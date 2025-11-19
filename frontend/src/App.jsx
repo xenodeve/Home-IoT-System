@@ -1,276 +1,625 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import axios from 'axios'
 import mqtt from 'mqtt'
-import { MQTT_CONFIG } from './mqttConfig'
+import { MQTT_CONFIG } from '../config/mqttConfig'
+import { APP_CONFIG } from '../config/config'
+import Counter from './components/Counter'
+import { MagicBentoCard, MagicBentoGrid } from './components/MagicBento'
 import './App.css'
+
+const API_BASE = APP_CONFIG.API_BASE
+const TIMEZONES = APP_CONFIG.TIMEZONES
 
 function App() {
   const [relayState, setRelayState] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [isMockMode, setIsMockMode] = useState(false)
+  const [picoConnected, setPicoConnected] = useState(true)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [mqttStatus, setMqttStatus] = useState({ enabled: false, connected: false })
   const [frontendMqttConnected, setFrontendMqttConnected] = useState(false)
-  
+  const [timeSnapshot, setTimeSnapshot] = useState(null)
+  const [currentTime, setCurrentTime] = useState(null)
+  const [schedules, setSchedules] = useState([])
+  const [scheduleError, setScheduleError] = useState(null)
+  const [scheduleLoading, setScheduleLoading] = useState(false)
+  const [creatingSchedule, setCreatingSchedule] = useState(false)
+  const [schedulingAvailable, setSchedulingAvailable] = useState(true)
+
+  const [form, setForm] = useState({
+    name: '',
+    action: 'on',
+    date: '',
+    time: '',
+    timezone: APP_CONFIG.DEFAULT_TIMEZONE,
+    notes: ''
+  })
+
   const mqttClientRef = useRef(null)
 
-  // API base URL - ใช้ /api เพราะ Vite proxy จะ forward ไปที่ backend
-  const API_BASE = '/api'
-
-  // Setup MQTT connection
   useEffect(() => {
-    console.log('🌐 Connecting to MQTT broker via WebSocket...')
-    
-    try {
-      // Connect to MQTT broker via WebSocket
-      const client = mqtt.connect(MQTT_CONFIG.BROKER_URL, MQTT_CONFIG.OPTIONS)
-      mqttClientRef.current = client
+    const client = mqtt.connect(MQTT_CONFIG.BROKER_URL, MQTT_CONFIG.OPTIONS)
+    mqttClientRef.current = client
 
-      client.on('connect', () => {
-        console.log('✅ Frontend MQTT Connected!')
-        setFrontendMqttConnected(true)
-        
-        // Subscribe to status topics
-        client.subscribe(MQTT_CONFIG.TOPICS.RELAY_STATUS, (err) => {
-          if (err) {
-            console.error('❌ Subscribe error:', err)
-          } else {
-            console.log('📨 Subscribed to:', MQTT_CONFIG.TOPICS.RELAY_STATUS)
-          }
-        })
-        
-        client.subscribe(MQTT_CONFIG.TOPICS.SYSTEM_STATUS, (err) => {
-          if (!err) {
-            console.log('📨 Subscribed to:', MQTT_CONFIG.TOPICS.SYSTEM_STATUS)
-          }
-        })
-      })
+    client.on('connect', () => {
+      setFrontendMqttConnected(true)
+      client.subscribe(Object.values(MQTT_CONFIG.TOPICS))
+    })
 
-      client.on('message', (topic, message) => {
-        console.log('📩 Received:', topic, message.toString())
-        
-        try {
-          const payload = JSON.parse(message.toString())
-          
-          if (topic === MQTT_CONFIG.TOPICS.RELAY_STATUS) {
-            // Update relay state from MQTT
-            setRelayState(payload.state === 'on')
-            setLastUpdate(new Date().toLocaleTimeString('th-TH'))
-            console.log('🔄 Real-time update: Relay', payload.state)
-          }
-        } catch (err) {
-          console.error('Error parsing MQTT message:', err)
+    client.on('message', (topic, message) => {
+      try {
+        const payload = JSON.parse(message.toString())
+        if (topic === MQTT_CONFIG.TOPICS.RELAY_STATUS) {
+          setRelayState(payload.state === 'on')
+          setLastUpdate(new Date().toLocaleTimeString('th-TH'))
         }
-      })
-
-      client.on('error', (error) => {
-        console.error('❌ MQTT Error:', error)
-        setFrontendMqttConnected(false)
-      })
-
-      client.on('close', () => {
-        console.log('🔌 MQTT Connection closed')
-        setFrontendMqttConnected(false)
-      })
-
-      client.on('reconnect', () => {
-        console.log('🔄 MQTT Reconnecting...')
-      })
-
-      // Cleanup on unmount
-      return () => {
-        if (client) {
-          console.log('🔌 Disconnecting MQTT...')
-          client.end()
-        }
+      } catch (err) {
+        console.error('MQTT parse error', err)
       }
-    } catch (err) {
-      console.error('Failed to connect to MQTT:', err)
-      setFrontendMqttConnected(false)
+    })
+
+    client.on('error', () => setFrontendMqttConnected(false))
+    client.on('close', () => setFrontendMqttConnected(false))
+
+    return () => {
+      client.end(true)
     }
   }, [])
 
-  // Fetch initial relay status
   useEffect(() => {
     fetchRelayStatus()
+    fetchHealth()
+    fetchTime()
+    fetchSchedules()
+
+    const interval = setInterval(() => {
+      fetchTime()
+      fetchSchedules(false)
+    }, APP_CONFIG.SCHEDULE_FETCH_INTERVAL)
+
+    return () => clearInterval(interval)
   }, [])
+
+  const fetchHealth = async () => {
+    try {
+      const { data } = await axios.get('/health')
+      setMqttStatus(data.mqtt)
+    } catch (err) {
+      console.error('Health check failed', err)
+    }
+  }
+
+  const fetchTime = async () => {
+    try {
+      const { data } = await axios.get('/api/time/now')
+      setTimeSnapshot(data)
+      setCurrentTime(new Date(data.now))
+    } catch (err) {
+      console.error('Time sync failed', err)
+    }
+  }
+
+  // Update current time every second
+  useEffect(() => {
+    if (!currentTime) return
+
+    const timer = setInterval(() => {
+      setCurrentTime(prev => new Date(prev.getTime() + 1000))
+    }, APP_CONFIG.CLOCK_UPDATE_INTERVAL)
+
+    return () => clearInterval(timer)
+  }, [currentTime])
+
+  // Sync time with backend every 30 seconds
+  useEffect(() => {
+    const syncTimer = setInterval(() => {
+      fetchTime()
+    }, APP_CONFIG.TIME_SYNC_INTERVAL)
+
+    return () => clearInterval(syncTimer)
+  }, [])
+
+  const fetchSchedules = async (showLoader = true) => {
+    if (showLoader) setScheduleLoading(true)
+    try {
+      const { data } = await axios.get(`${API_BASE}/schedules`)
+      setSchedules(data.data || [])
+      setSchedulingAvailable(true)
+      setScheduleError(null)
+    } catch (err) {
+      if (err.response?.status === 503) {
+        setSchedulingAvailable(false)
+      }
+      setScheduleError('ไม่สามารถโหลดกำหนดการได้')
+    } finally {
+      if (showLoader) setScheduleLoading(false)
+    }
+  }
 
   const fetchRelayStatus = async () => {
     try {
-      setError(null)
       const response = await axios.get(`${API_BASE}/relay/status`)
       setRelayState(response.data.state === 'on')
       setIsMockMode(response.data.mock || false)
+      setPicoConnected(response.data.connected !== false)
       setLastUpdate(new Date().toLocaleTimeString('th-TH'))
-      
-      // Also fetch health to get MQTT status
-      const healthResponse = await axios.get('/health')
-      if (healthResponse.data.mqtt) {
-        setMqttStatus(healthResponse.data.mqtt)
-      }
+      setError(null)
     } catch (err) {
       console.error('Error fetching relay status:', err)
-      setError('ไม่สามารถเชื่อมต่อกับ backend ได้')
+      
+      if (err.response?.status === 503) {
+        // Pico W connection error
+        setPicoConnected(false)
+        setError(err.response.data?.error || 'ไม่สามารถเชื่อมต่อกับ Pico W ได้')
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        // Backend connection error
+        setPicoConnected(false)
+        setError('ไม่สามารถเชื่อมต่อกับ Backend ได้')
+      } else {
+        setPicoConnected(false)
+        setError('เกิดข้อผิดพลาดในการตรวจสอบสถานะ')
+      }
     }
   }
 
   const controlRelay = async (state) => {
+    if (loading) return
+
+    const previousState = relayState
+    setRelayState(state)
+
     try {
       setLoading(true)
       setError(null)
-      
-      // If MQTT is connected, publish directly
+
       if (frontendMqttConnected && mqttClientRef.current) {
-        const payload = JSON.stringify({ state: state ? 'on' : 'off' })
         mqttClientRef.current.publish(
           MQTT_CONFIG.TOPICS.RELAY_CONTROL,
-          payload,
+          JSON.stringify({ state: state ? 'on' : 'off' }),
           { qos: 1 }
         )
-        console.log('📤 Published via MQTT:', payload)
-        // State will be updated via MQTT message callback
       } else {
-        // Fallback to HTTP API
-        const response = await axios.post(`${API_BASE}/relay/control`, {
-          state: state ? 'on' : 'off'
-        })
-
-        if (response.data.success) {
-          setRelayState(state)
-          setIsMockMode(response.data.mock || false)
-          setLastUpdate(new Date().toLocaleTimeString('th-TH'))
-        }
+        await axios.post(`${API_BASE}/relay/control`, { state: state ? 'on' : 'off' })
       }
     } catch (err) {
-      console.error('Error controlling relay:', err)
+      setRelayState(previousState)
       setError('เกิดข้อผิดพลาดในการควบคุมรีเลย์')
     } finally {
       setLoading(false)
     }
   }
 
-  const toggleRelay = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      
-      // Toggle based on current state
-      const newState = !relayState
-      
-      // If MQTT is connected, publish directly
-      if (frontendMqttConnected && mqttClientRef.current) {
-        const payload = JSON.stringify({ state: newState ? 'on' : 'off' })
-        mqttClientRef.current.publish(
-          MQTT_CONFIG.TOPICS.RELAY_CONTROL,
-          payload,
-          { qos: 1 }
-        )
-        console.log('📤 Published toggle via MQTT:', payload)
-        // State will be updated via MQTT message callback
-      } else {
-        // Fallback to HTTP API
-        const response = await axios.post(`${API_BASE}/relay/toggle`)
+  const handleFormChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }))
+  }
 
-        if (response.data.success) {
-          setRelayState(response.data.newState === 'on')
-          setIsMockMode(response.data.mock || false)
-          setLastUpdate(new Date().toLocaleTimeString('th-TH'))
-        }
-      }
-    } catch (err) {
-      console.error('Error toggling relay:', err)
-      setError('เกิดข้อผิดพลาดในการสลับสถานะรีเลย์')
-    } finally {
-      setLoading(false)
+  const handleCreateSchedule = async (event) => {
+    event.preventDefault()
+    if (!form.date || !form.time) {
+      setScheduleError('กรุณาเลือกวันและเวลา')
+      return
     }
+
+    const executeAt = `${form.date}T${form.time}`
+
+    try {
+      setCreatingSchedule(true)
+      await axios.post(`${API_BASE}/schedules`, {
+        name: form.name,
+        action: form.action,
+        executeAt,
+        timezone: form.timezone,
+        notes: form.notes
+      })
+      await fetchSchedules()
+      setForm((prev) => ({ ...prev, name: '', notes: '' }))
+      setScheduleError(null)
+    } catch (err) {
+      setScheduleError(err.response?.data?.error || 'สร้างกำหนดการไม่สำเร็จ')
+    } finally {
+      setCreatingSchedule(false)
+    }
+  }
+
+  const handleCancelSchedule = async (id) => {
+    try {
+      await axios.patch(`${API_BASE}/schedules/${id}/cancel`)
+      fetchSchedules()
+    } catch (err) {
+      setScheduleError('ยกเลิกกำหนดการไม่สำเร็จ')
+    }
+  }
+
+  const handleDeleteSchedule = async (id) => {
+    try {
+      await axios.delete(`${API_BASE}/schedules/${id}`)
+      fetchSchedules()
+    } catch (err) {
+      setScheduleError('ลบกำหนดการไม่สำเร็จ')
+    }
+  }
+
+  const nextSchedule = useMemo(() => {
+    return schedules.find((s) => s.status === 'pending') || null
+  }, [schedules])
+
+  const groupedSchedules = useMemo(() => {
+    return {
+      upcoming: schedules.filter((s) => ['pending', 'processing'].includes(s.status)),
+      history: schedules.filter((s) => ['completed', 'failed', 'cancelled'].includes(s.status))
+    }
+  }, [schedules])
+
+  const formatDateTime = (iso, timezone) => {
+    if (!iso) return '-'
+    const date = new Date(iso)
+    return new Intl.DateTimeFormat('th-TH', {
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+      timeZone: timezone || 'UTC'
+    }).format(date)
+  }
+
+  const getStatusText = (status) => {
+    const statusMap = {
+      'pending': 'รอดำเนินการ',
+      'processing': 'กำลังดำเนินการ',
+      'completed': 'สำเร็จ',
+      'failed': 'ล้มเหลว',
+      'cancelled': 'ยกเลิกแล้ว'
+    }
+    return statusMap[status] || status
   }
 
   return (
     <div className="app">
-      <div className="container">
-        <header className="header">
-          <h1>🏠 Home IoT Control</h1>
-          <p>ระบบควบคุมรีเลย์ผ่านเว็บ</p>
-          <div className="badges">
-            {isMockMode && (
-              <div className="mock-badge">
-                🧪 Mock Mode
-              </div>
+      <div className="dashboard">
+        <header className="dashboard__header">
+          <div>
+            <p className="eyebrow">Home IoT System</p>
+            <h1>Smart Relay Dashboard</h1>
+            <p className="subhead">ควบคุมอุปกรณ์และตั้งเวลาเปิดปิดจากศูนย์กลางเดียว</p>
+          </div>
+          <div className="badge-row">
+            {isMockMode && <span className="chip chip--warning">🧪 Mock Mode</span>}
+            <span className={`chip ${picoConnected ? 'chip--success' : 'chip--danger'}`}>
+              {picoConnected ? '✅ Relay Connected' : '❌ Relay Disconnected'}
+            </span>
+            {mqttStatus?.enabled && (
+              <span className={`chip ${mqttStatus.connected ? 'chip--success' : 'chip--danger'}`}>
+                {mqttStatus.connected ? '🌐 Backend MQTT Online' : '⚠️ Backend MQTT Offline'}
+              </span>
             )}
-            {mqttStatus.enabled && (
-              <div className={`mqtt-badge ${mqttStatus.connected ? 'connected' : 'disconnected'}`}>
-                {mqttStatus.connected ? '🌐 Backend MQTT' : '⚠️ Backend MQTT Off'}
-              </div>
-            )}
-            <div className={`mqtt-badge ${frontendMqttConnected ? 'connected' : 'disconnected'}`}>
-              {frontendMqttConnected ? '✨ Real-time ON' : '⏸️ Real-time OFF'}
-            </div>
+            <span className={`chip ${frontendMqttConnected ? 'chip--success' : 'chip--danger'}`}>
+              {frontendMqttConnected ? '✨ Real-time Sync' : '⏸️ Real-time paused'}
+            </span>
           </div>
         </header>
 
-        <div className="status-card">
-          <div className="status-indicator">
-            <div className={`status-light ${relayState ? 'on' : 'off'}`}></div>
-            <div className="status-text">
-              <h2>สถานะรีเลย์</h2>
-              <p className={`status-label ${relayState ? 'on' : 'off'}`}>
-                {relayState ? '🟢 เปิด' : '⚫ ปิด'}
-              </p>
+        <MagicBentoGrid enableSpotlight={true} spotlightRadius={300} glowColor="56, 189, 248">
+          <section className="grid grid--metrics">
+            <MagicBentoCard 
+              enableStars={true}
+              enableBorderGlow={true}
+              enableTilt={false}
+              enableMagnetism={true}
+              clickEffect={true}
+              particleCount={8}
+              glowColor="56, 189, 248"
+              className="card metric-card"
+              style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px', paddingLeft: '28px' }}
+            >
+              <p className="label" style={{ margin: 0 }}>สถานะรีเลย์</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className={`status-dot ${relayState ? 'is-on' : 'is-off'}`} />
+                <h3 style={{ margin: 0 }}>{relayState ? 'เปิดใช้งาน' : 'ปิดอยู่'}</h3>
+              </div>
+              {lastUpdate && <small style={{ display: 'block' }}>อัพเดทล่าสุด {lastUpdate}</small>}
+            </MagicBentoCard>
+            <MagicBentoCard 
+              enableStars={true}
+              enableBorderGlow={true}
+              enableTilt={false}
+              enableMagnetism={true}
+              clickEffect={true}
+              particleCount={8}
+              glowColor="56, 189, 248"
+              className="card metric-card"
+              style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}
+            >
+              <p className="label" style={{ margin: 0 }}>กำหนดการถัดไป</p>
+              {nextSchedule ? (
+                <>
+                  <h3 style={{ margin: 0 }}>{nextSchedule.action === 'on' ? 'เปิด' : 'ปิด'}</h3>
+                  <small style={{ display: 'block' }}>{formatDateTime(nextSchedule.executeAt, nextSchedule.timezone)}</small>
+                  <small style={{ display: 'block', opacity: 0.7 }}>{nextSchedule.name}</small>
+                </>
+              ) : (
+                <>
+                  <h3 style={{ margin: 0 }}>ยังไม่มี</h3>
+                  <small style={{ opacity: 0.7 }}>สร้างกำหนดการใหม่ได้ทันที</small>
+                </>
+              )}
+            </MagicBentoCard>
+            <MagicBentoCard 
+              enableStars={true}
+              enableBorderGlow={true}
+              enableTilt={false}
+              enableMagnetism={true}
+              clickEffect={true}
+              particleCount={8}
+              glowColor="56, 189, 248"
+              className="card metric-card"
+              style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}
+            >
+              <p className="label">เวลามาตรฐาน</p>
+              {currentTime ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Counter
+                    value={currentTime.getHours()}
+                    places={[10, 1]}
+                    fontSize={36}
+                    padding={4}
+                    gap={2}
+                    textColor="#e2e8f0"
+                    fontWeight={800}
+                    borderRadius={12}
+                    horizontalPadding={8}
+                    gradientHeight={0}
+                    counterStyle={{
+                      background: 'transparent',
+                      border: 'none'
+                    }}
+                  />
+                  <span style={{ fontSize: '32px', fontWeight: 800, color: '#38bdf8', marginTop: '-2px', textShadow: '0 2px 8px rgba(56, 189, 248, 0.5)' }}>:</span>
+                  <Counter
+                    value={currentTime.getMinutes()}
+                    places={[10, 1]}
+                    fontSize={36}
+                    padding={4}
+                    gap={2}
+                    textColor="#e2e8f0"
+                    fontWeight={800}
+                    borderRadius={12}
+                    horizontalPadding={8}
+                    gradientHeight={0}
+                    counterStyle={{
+                      background: 'transparent',
+                      border: 'none'
+                    }}
+                  />
+                  <span style={{ fontSize: '32px', fontWeight: 800, color: '#38bdf8', marginTop: '-2px', textShadow: '0 2px 8px rgba(56, 189, 248, 0.5)' }}>:</span>
+                  <Counter
+                    value={currentTime.getSeconds()}
+                    places={[10, 1]}
+                    fontSize={36}
+                    padding={4}
+                    gap={2}
+                    textColor="#e2e8f0"
+                    fontWeight={800}
+                    borderRadius={12}
+                    horizontalPadding={8}
+                    gradientHeight={0}
+                    counterStyle={{
+                      background: 'transparent',
+                      border: 'none'
+                    }}
+                  />
+                </div>
+              ) : (
+                <h3>กำลังซิงค์...</h3>
+              )}
+              <small style={{ marginTop: '4px', display: 'block', opacity: 0.7 }}>
+                source: {timeSnapshot?.source || 'system'}
+              </small>
+            </MagicBentoCard>
+          </section>
+
+          <section className="grid grid--main">
+            <MagicBentoCard 
+            enableStars={true}
+            enableBorderGlow={true}
+            enableTilt={false}
+            enableMagnetism={true}
+            clickEffect={true}
+            clickEffectScale={0.2}
+            particleCount={10}
+            glowColor="56, 189, 248"
+            magnetismStrength={0.015}
+            className="card control-card"
+          >
+            <div className="card__header">
+              <h2>ควบคุมแบบเรียลไทม์</h2>
+              <p>ส่งคำสั่งผ่าน MQTT หรือ REST API แบบอัตโนมัติ</p>
             </div>
-          </div>
-          
-          {lastUpdate && (
-            <p className="last-update">อัพเดทล่าสุด: {lastUpdate}</p>
-          )}
-        </div>
+            {!picoConnected && (
+              <div className="alert alert--warning" style={{ margin: '0 0 1rem 0' }}>
+                ⚠️ ไม่สามารถเชื่อมต่อกับส่วน Relay ของ Raspberry Pi Pico W ได้ - กรุณาตรวจสอบอุปกรณ์
+              </div>
+            )}
+            
+            <div className="control-visual">
+              <div className={`light${relayState ? ' on' : ''}`}>
+                <div className="wire"></div>
+                <div className="bulb">
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+            </div>
 
-        {error && (
-          <div className="error-message">
-            ⚠️ {error}
-          </div>
-        )}
+            <div className="control-toggle">
+              <label className={`relay-switch${loading || !picoConnected ? ' is-disabled' : ''}${loading ? ' is-busy' : ''}`}>
+                <input
+                  className="relay-switch__input l"
+                  type="checkbox"
+                  role="switch"
+                  aria-checked={relayState}
+                  checked={relayState}
+                  disabled={loading || !picoConnected}
+                  onChange={(event) => controlRelay(event.target.checked)}
+                />
+                <span className="relay-switch__track">
+                  <span className="relay-switch__thumb" />
+                </span>
+                <span className="relay-switch__text">
+                  <span className="relay-switch__title">{relayState ? 'รีเลย์ทำงานอยู่' : 'รีเลย์ปิดอยู่'}</span>
+                  <span className="relay-switch__hint">{loading ? 'กำลังส่งคำสั่ง...' : picoConnected ? 'แตะเพื่อสลับสถานะ' : 'อุปกรณ์ไม่พร้อมใช้งาน'}</span>
+                </span>
+              </label>
+            </div>
+          </MagicBentoCard>
 
-        <div className="controls">
-          <button
-            className={`control-button on ${relayState ? 'active' : ''}`}
-            onClick={() => controlRelay(true)}
-            disabled={loading || relayState}
+          <MagicBentoCard 
+            enableStars={true}
+            enableBorderGlow={true}
+            enableTilt={false}
+            enableMagnetism={true}
+            clickEffect={true}
+            clickEffectScale={0.2}
+            particleCount={10}
+            glowColor="56, 189, 248"
+            magnetismStrength={0.015}
+            className="card schedule-card"
           >
-            <span className="button-icon">💡</span>
-            <span className="button-text">เปิด</span>
-          </button>
+            <div className="card__header">
+              <h2>สร้างกำหนดการ</h2>
+              <p>ดึงเวลาจาก server ภายนอกเพื่อความแม่นยำ</p>
+            </div>
+            {!schedulingAvailable ? (
+              <div className="empty-state">
+                <p>ยังไม่ได้ตั้งค่า MongoDB URI บน backend</p>
+                <small>เพิ่มค่า MONGODB_URI ในไฟล์ .env เพื่อเปิดใช้งาน</small>
+              </div>
+            ) : (
+              <form className="schedule-form" onSubmit={handleCreateSchedule}>
+                <div className="form-row">
+                  <label>ชื่อกำหนดการ</label>
+                  <input type="text" value={form.name} placeholder="เช่น เปิดไฟหน้าบ้าน" onChange={(e) => handleFormChange('name', e.target.value)} />
+                </div>
+                <div className="form-grid">
+                  <div>
+                    <label>วันที่</label>
+                    <input type="date" value={form.date} onChange={(e) => handleFormChange('date', e.target.value)} required />
+                  </div>
+                  <div>
+                    <label>เวลา</label>
+                    <input type="time" value={form.time} onChange={(e) => handleFormChange('time', e.target.value)} required />
+                  </div>
+                </div>
+                <div className="form-grid">
+                  <div>
+                    <label>การทำงาน</label>
+                    <select value={form.action} onChange={(e) => handleFormChange('action', e.target.value)}>
+                      <option value="on">เปิด</option>
+                      <option value="off">ปิด</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>โซนเวลา</label>
+                    <select value={form.timezone} onChange={(e) => handleFormChange('timezone', e.target.value)}>
+                      {TIMEZONES.map((tz) => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="form-row">
+                  <label>หมายเหตุ</label>
+                  <textarea value={form.notes} rows={2} onChange={(e) => handleFormChange('notes', e.target.value)} placeholder="ตัวอย่าง: เปิดก่อนพระอาทิตย์ตก" />
+                </div>
+                <button className="pill-button pill-button--primary" type="submit" disabled={creatingSchedule}>
+                  {creatingSchedule ? 'กำลังบันทึก...' : 'บันทึกกำหนดการ'}
+                </button>
+              </form>
+            )}
+          </MagicBentoCard>
+        </section>
 
-          <button
-            className="control-button toggle"
-            onClick={toggleRelay}
-            disabled={loading}
+        <section className="grid grid--full">
+          <MagicBentoCard 
+            enableStars={true}
+            enableBorderGlow={true}
+            enableTilt={false}
+            enableMagnetism={true}
+            clickEffect={true}
+            clickEffectScale={0.1}
+            particleCount={12}
+            glowColor="56, 189, 248"
+            magnetismStrength={0.015}
+            className="card schedule-list"
           >
-            <span className="button-icon">🔄</span>
-            <span className="button-text">สลับ</span>
-          </button>
+            <div className="card__header">
+              <h2>รายการกำหนดการ</h2>
+              <p>ติดตามสถานะการทำงานแบบเรียลไทม์</p>
+            </div>
+            {scheduleLoading ? (
+              <div className="empty-state">กำลังโหลด...</div>
+            ) : groupedSchedules.upcoming.length === 0 && groupedSchedules.history.length === 0 ? (
+              <div className="empty-state">ยังไม่มีกำหนดการ</div>
+            ) : (
+              <>
+                {groupedSchedules.upcoming.length > 0 && (
+                  <div>
+                    <h3>กำลังจะทำงาน</h3>
+                    <ul>
+                      {groupedSchedules.upcoming.map((schedule) => (
+                        <li key={schedule._id} className={`schedule-item schedule-item--${schedule.status}`}>
+                          <div>
+                            <p className="schedule-title">{schedule.name}</p>
+                            <small>{formatDateTime(schedule.executeAt, schedule.timezone)} • {schedule.action === 'on' ? 'เปิด' : 'ปิด'}</small>
+                          </div>
+                          <div className="schedule-actions">
+                            <span className={`chip chip--${schedule.status}`}>{getStatusText(schedule.status)}</span>
+                            {schedule.status === 'pending' && (
+                              <button
+                                type="button"
+                                className="chip chip--pending chip--action"
+                                onClick={() => handleCancelSchedule(schedule._id)}
+                              >
+                                ยกเลิก
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {groupedSchedules.history.length > 0 && (
+                  <div>
+                    <h3>ประวัติล่าสุด</h3>
+                    <ul>
+                      {groupedSchedules.history.slice(0, 5).map((schedule) => (
+                        <li key={schedule._id} className={`schedule-item history schedule-item--${schedule.status}`}>
+                          <div>
+                            <p className="schedule-title">{schedule.name}</p>
+                            <small>{formatDateTime(schedule.executedAt || schedule.executeAt, schedule.timezone)}</small>
+                          </div>
+                          <div className="schedule-actions">
+                            <span className={`chip chip--${schedule.status}`}>{getStatusText(schedule.status)}</span>
+                            <button
+                              type="button"
+                              className="chip chip--danger chip--action"
+                              onClick={() => handleDeleteSchedule(schedule._id)}
+                            >
+                              ลบ
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </MagicBentoCard>
+          </section>
+        </MagicBentoGrid>
 
-          <button
-            className={`control-button off ${!relayState ? 'active' : ''}`}
-            onClick={() => controlRelay(false)}
-            disabled={loading || !relayState}
-          >
-            <span className="button-icon">🌙</span>
-            <span className="button-text">ปิด</span>
-          </button>
-        </div>
-
-        <button
-          className="refresh-button"
-          onClick={fetchRelayStatus}
-          disabled={loading}
-        >
-          🔄 รีเฟรชสถานะ
-        </button>
-
-        <footer className="footer">
-          <p>Powered by Pico W + Express + React</p>
-        </footer>
+        {error && <div className="alert alert--error">⚠️ {error}</div>}
+        {scheduleError && <div className="alert alert--error">⚠️ {scheduleError}</div>}
       </div>
     </div>
   )

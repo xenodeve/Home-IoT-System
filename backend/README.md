@@ -1,6 +1,6 @@
 # Home IoT System - Express Backend
 
-Express.js backend สำหรับควบคุม Pico W IoT relay system ผ่าน REST API
+Express.js backend สำหรับควบคุม Pico W IoT relay system ผ่าน REST API + MQTT + Scheduling
 
 ## โครงสร้างโปรเจ็กต์
 
@@ -19,6 +19,8 @@ backend/
 - ✅ Error handling และ logging
 - ✅ Health check endpoint
 - ✅ Proxy requests ไปยัง Pico W
+- ✅ MQTT integration + Scheduler ที่ sync เวลากับ third-party server
+- ✅ MongoDB Atlas storage สำหรับกำหนดการเปิด/ปิดอัตโนมัติ
 
 ## API Endpoints
 
@@ -45,6 +47,20 @@ Response: {"success": true, "state": "on"|"off", "data": {...}}
 ```
 POST /api/relay/toggle
 Response: {"success": true, "previousState": "on", "newState": "off", "data": {...}}
+```
+
+### Time Sync (third-party)
+```
+GET /api/time/now
+Response: {"now": "2025-11-19T11:00:00Z", "timezone": "Asia/Bangkok", "source": "worldtimeapi.org"}
+```
+
+### Scheduling APIs
+```
+GET    /api/schedules               # รายการกำหนดการทั้งหมด
+POST   /api/schedules               # สร้างกำหนดการใหม่
+PATCH  /api/schedules/:id/cancel    # ยกเลิกกำหนดการที่รอดำเนินการ
+DELETE /api/schedules/:id           # ลบออกจากฐานข้อมูล
 ```
 
 ## การติดตั้ง
@@ -83,6 +99,13 @@ MOCK_MODE=false
 **หมายเหตุ:** 
 - เปลี่ยน `192.168.1.100` เป็น IP address จริงของ Pico W ของคุณ
 - ตั้ง `MOCK_MODE=true` เพื่อทดสอบโดยไม่ต้องมี Pico W (เหมาะสำหรับพัฒนา frontend)
+- ดึงค่าอื่น ๆ จากไฟล์ `.env.example` หากต้องการ reference
+
+**ค่าที่จำเป็นสำหรับระบบ Scheduling และ MongoDB:**
+- `MONGODB_URI` – connection string ของ MongoDB Atlas (ต้องเปิดให้ backend เข้าถึงได้)
+- `TIMEZONE` – timezone หลักของระบบ (เช่น `Asia/Bangkok`) สำหรับแปลงเวลาที่ผู้ใช้ตั้ง
+- `TIME_API_URL` – endpoint ของ third-party time provider (ดีฟอลต์ใช้ `https://worldtimeapi.org/api`)
+- `SCHEDULER_INTERVAL_MS` – ความถี่ในการเช็คกำหนดการ (มิลลิวินาที) ค่า default คือ `30000`
 
 ### 3. อัพเดท Code บน Pico W
 

@@ -2,12 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const mqtt = require('mqtt');
+const mongoose = require('mongoose');
+const { DateTime } = require('luxon');
+const TimeService = require('./services/timeService');
+const initScheduler = require('./services/scheduler');
+const FileStorage = require('./services/fileStorage');
+const MongoStorage = require('./services/mongoStorage');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const PICO_IP = process.env.PICO_IP || '192.168.1.100'; // ตั้งค่า IP ของ Pico W
-const MOCK_MODE = process.env.MOCK_MODE === 'true'; // Mock mode สำหรับทดสอบโดยไม่มี Pico W
+const PICO_IP = process.env.PICO_IP || '192.168.1.100';
+const MOCK_MODE = process.env.MOCK_MODE === 'true';
 
 // MQTT Configuration
 const MQTT_ENABLED = process.env.MQTT_ENABLED === 'true';
@@ -17,28 +23,94 @@ const MQTT_USERNAME = process.env.MQTT_USERNAME || '';
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD || '';
 const MQTT_CLIENT_ID = process.env.MQTT_CLIENT_ID || 'home-iot-backend';
 
+// Scheduling configuration
+const STORAGE_TYPE = process.env.STORAGE_TYPE || 'file';
+const MONGODB_URI = process.env.MONGODB_URI || '';
+const TIMEZONE = process.env.TIMEZONE || 'Asia/Bangkok';
+const TIME_API_URL = process.env.TIME_API_URL || 'https://worldtimeapi.org/api';
+const GOOGLE_TIMEZONE_API_KEY = process.env.GOOGLE_TIMEZONE_API_KEY || '';
+const SCHEDULER_INTERVAL_MS = Number(process.env.SCHEDULER_INTERVAL_MS || 30000);
+
+// Services
+const timeService = new TimeService({ 
+  baseUrl: TIME_API_URL, 
+  timezone: TIMEZONE,
+  googleApiKey: GOOGLE_TIMEZONE_API_KEY 
+});
+
 // MQTT Topics
 const TOPICS = {
-  RELAY_CONTROL: 'home-iot/relay/control',  // Subscribe: receive commands
-  RELAY_STATUS: 'home-iot/relay/status',    // Publish: send status updates
-  SYSTEM_STATUS: 'home-iot/system/status'   // Publish: system info
+  RELAY_CONTROL: 'home-iot/relay/control',
+  RELAY_STATUS: 'home-iot/relay/status',
+  SYSTEM_STATUS: 'home-iot/system/status'
 };
 
-// Mock relay state (for testing without hardware)
+// Runtime state
 let mockRelayState = true;
 let mqttClient = null;
 let mqttConnected = false;
+let mongoConnected = false;
+let schedulerManager = null;
+let storageAdapter = null;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
   next();
 });
+
+// Storage Setup
+if (STORAGE_TYPE === 'mongodb') {
+  if (!MONGODB_URI) {
+    console.error('❌ STORAGE_TYPE=mongodb but MONGODB_URI is missing');
+    process.exit(1);
+  }
+
+  mongoose
+    .connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 })
+    .catch((err) => console.error('Mongo connection error:', err.message));
+
+  mongoose.connection.on('connected', () => {
+    mongoConnected = true;
+    storageAdapter = new MongoStorage();
+    console.log('✅ MongoDB connected (storage: mongodb)');
+
+    if (!schedulerManager) {
+      schedulerManager = initScheduler({
+        storage: storageAdapter,
+        getAuthoritativeTime: () => timeService.fetchAuthoritativeTime(),
+        executeRelayAction: (action, context) => performRelayAction(action, { ...context, source: 'scheduler' }),
+        intervalMs: SCHEDULER_INTERVAL_MS
+      });
+      schedulerManager.start();
+    }
+  });
+
+  mongoose.connection.on('disconnected', () => {
+    mongoConnected = false;
+    console.warn('⚠️  MongoDB disconnected');
+    if (schedulerManager) {
+      schedulerManager.stop();
+      schedulerManager = null;
+    }
+  });
+} else {
+  // File storage (default)
+  storageAdapter = new FileStorage();
+  console.log('✅ File storage initialized (storage: file)');
+  
+  schedulerManager = initScheduler({
+    storage: storageAdapter,
+    getAuthoritativeTime: () => timeService.fetchAuthoritativeTime(),
+    executeRelayAction: (action, context) => performRelayAction(action, { ...context, source: 'scheduler' }),
+    intervalMs: SCHEDULER_INTERVAL_MS
+  });
+  schedulerManager.start();
+}
 
 // MQTT Setup
 if (MQTT_ENABLED) {
@@ -46,7 +118,7 @@ if (MQTT_ENABLED) {
     clientId: MQTT_CLIENT_ID,
     clean: true,
     connectTimeout: 4000,
-    reconnectPeriod: 1000,
+    reconnectPeriod: 1000
   };
 
   if (MQTT_USERNAME && MQTT_PASSWORD) {
@@ -59,8 +131,7 @@ if (MQTT_ENABLED) {
   mqttClient.on('connect', () => {
     mqttConnected = true;
     console.log('📡 MQTT Connected to broker:', MQTT_BROKER);
-    
-    // Subscribe to control topic
+
     mqttClient.subscribe(TOPICS.RELAY_CONTROL, (err) => {
       if (err) {
         console.error('MQTT subscription error:', err);
@@ -69,7 +140,6 @@ if (MQTT_ENABLED) {
       }
     });
 
-    // Publish system status
     publishSystemStatus();
   });
 
@@ -84,50 +154,33 @@ if (MQTT_ENABLED) {
   });
 
   mqttClient.on('message', async (topic, message) => {
-    console.log(`📩 MQTT Message received on ${topic}:`, message.toString());
-    
-    if (topic === TOPICS.RELAY_CONTROL) {
-      try {
-        const payload = JSON.parse(message.toString());
-        const state = payload.state;
-        
-        if (state && ['on', 'off'].includes(state.toLowerCase())) {
-          // Control relay via HTTP or mock
-          if (MOCK_MODE) {
-            mockRelayState = state.toLowerCase() === 'on';
-            console.log(`🧪 Mock relay: ${state}`);
-          } else {
-            await axios.post(
-              `http://${PICO_IP}/api/relay`,
-              { state: state.toLowerCase() },
-              { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
-            );
-          }
-          
-          // Publish status update
-          publishRelayStatus(state.toLowerCase());
-        }
-      } catch (error) {
-        console.error('Error processing MQTT message:', error.message);
+    if (topic !== TOPICS.RELAY_CONTROL) return;
+
+    try {
+      const payload = JSON.parse(message.toString());
+      if (payload?.state) {
+        await performRelayAction(payload.state, { source: 'mqtt-control' });
       }
+    } catch (error) {
+      console.error('Error processing MQTT message:', error.message);
     }
   });
 }
 
-// Helper function to publish relay status
-function publishRelayStatus(state) {
+// Helper: publish relay status via MQTT
+function publishRelayStatus(state, meta = {}) {
   if (mqttClient && mqttConnected) {
     const payload = JSON.stringify({
-      state: state,
+      state,
       timestamp: new Date().toISOString(),
-      source: 'backend'
+      source: meta.source || 'backend',
+      scheduleId: meta.scheduleId || null,
+      requestedAt: meta.requestedAt || null
     });
     mqttClient.publish(TOPICS.RELAY_STATUS, payload, { qos: 1 });
-    console.log('📤 Published relay status:', state);
   }
 }
 
-// Helper function to publish system status
 function publishSystemStatus() {
   if (mqttClient && mqttConnected) {
     const payload = JSON.stringify({
@@ -139,201 +192,250 @@ function publishSystemStatus() {
   }
 }
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    mqtt: {
-      enabled: MQTT_ENABLED,
-      connected: mqttConnected
+async function performRelayAction(targetState, context = {}) {
+  const state = String(targetState).toLowerCase();
+  if (!['on', 'off'].includes(state)) {
+    throw new Error('Invalid relay state');
+  }
+
+  if (MOCK_MODE) {
+    mockRelayState = state === 'on';
+    console.log(`🧪 Mock relay set to ${state} (${context.source || 'api'})`);
+    publishRelayStatus(state, context);
+    return { state, mock: MOCK_MODE };
+  }
+
+  // Try MQTT first if enabled and connected
+  if (mqttClient && mqttConnected) {
+    try {
+      const controlPayload = JSON.stringify({ 
+        state,
+        timestamp: new Date().toISOString(),
+        source: context.source || 'backend',
+        scheduleId: context.scheduleId || null
+      });
+      
+      await new Promise((resolve, reject) => {
+        mqttClient.publish(TOPICS.RELAY_CONTROL, controlPayload, { qos: 1 }, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+
+      console.log(`📡 MQTT command sent: ${state} (${context.source || 'api'})`);
+      publishRelayStatus(state, context);
+      return { state, mock: false, method: 'mqtt' };
+    } catch (mqttError) {
+      console.warn(`⚠️  MQTT publish failed, falling back to HTTP: ${mqttError.message}`);
     }
+  }
+
+  // Fallback to HTTP if MQTT not available or failed
+  try {
+    await axios.post(
+      `http://${PICO_IP}/api/relay`,
+      { state },
+      { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+    );
+    console.log(`🌐 HTTP command sent: ${state} (${context.source || 'api'})`);
+    publishRelayStatus(state, context);
+    return { state, mock: false, method: 'http' };
+  } catch (httpError) {
+    console.error(`❌ HTTP command failed: ${httpError.message}`);
+    throw new Error(`Failed to control relay via HTTP: ${httpError.message}`);
+  }
+}
+
+function ensureStorageReady(res) {
+  if (!storageAdapter) {
+    res.status(503).json({ error: 'Storage not initialized' });
+    return false;
+  }
+  return true;
+}
+
+// Routes
+app.get('/health', async (req, res) => {
+  let scheduleStats = 0;
+  if (storageAdapter) {
+    try {
+      const pending = await storageAdapter.find({ status: 'pending' });
+      scheduleStats = pending.length;
+    } catch {}
+  }
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    mqtt: { enabled: MQTT_ENABLED, connected: mqttConnected },
+    storage: { type: STORAGE_TYPE, ready: Boolean(storageAdapter), mongoConnected },
+    schedules: { pending: scheduleStats }
   });
 });
 
-// Get relay status
+app.get('/api/time/now', async (req, res) => {
+  try {
+    const snapshot = await timeService.fetchAuthoritativeTime(req.query.timezone);
+    res.json(snapshot);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch time', message: error.message });
+  }
+});
+
 app.get('/api/relay/status', async (req, res) => {
   try {
     if (MOCK_MODE) {
-      // Mock response
-      console.log('Mock mode: returning simulated relay status');
-      return res.json({ 
-        state: mockRelayState ? 'on' : 'off', 
-        success: true,
-        mock: true
-      });
+      return res.json({ state: mockRelayState ? 'on' : 'off', success: true, mock: true, connected: true });
     }
 
-    const response = await axios.get(`http://${PICO_IP}/api/relay`, {
-      timeout: 5000
-    });
-    res.json(response.data);
+    const response = await axios.get(`http://${PICO_IP}/api/relay`, { timeout: 5000 });
+    res.json({ ...response.data, connected: true, picoIp: PICO_IP });
   } catch (error) {
     console.error('Error getting relay status:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to get relay status',
-      message: error.message,
+    
+    const isConnectionError = error.code === 'ECONNREFUSED' || 
+                              error.code === 'ETIMEDOUT' || 
+                              error.code === 'ENOTFOUND' ||
+                              error.code === 'ECONNRESET';
+    
+    res.status(503).json({ 
+      success: false,
+      connected: false,
+      error: isConnectionError ? 'ไม่สามารถเชื่อมต่อกับ Pico W ได้' : 'เกิดข้อผิดพลาด',
+      message: error.message, 
       picoIp: PICO_IP,
-      hint: 'Set MOCK_MODE=true in .env to test without Pico W'
+      errorCode: error.code
     });
   }
 });
 
-// Control relay (turn on/off)
 app.post('/api/relay/control', async (req, res) => {
   try {
     const { state } = req.body;
-    
-    if (!state || !['on', 'off'].includes(state.toLowerCase())) {
-      return res.status(400).json({ 
-        error: 'Invalid state. Must be "on" or "off"' 
-      });
-    }
-
-    if (MOCK_MODE) {
-      // Mock response
-      mockRelayState = state.toLowerCase() === 'on';
-      console.log(`Mock mode: relay turned ${state.toLowerCase()}`);
-      
-      // Publish to MQTT if enabled
-      publishRelayStatus(state.toLowerCase());
-      
-      return res.json({
-        success: true,
-        state: state.toLowerCase(),
-        mock: true,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    const response = await axios.post(
-      `http://${PICO_IP}/api/relay`,
-      { state: state.toLowerCase() },
-      { 
-        timeout: 5000,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-
-    // Publish to MQTT if enabled
-    publishRelayStatus(state.toLowerCase());
-    
-    res.json({
-      success: true,
-      state: state.toLowerCase(),
-      data: response.data
-    });
+    const result = await performRelayAction(state, { source: 'api-control' });
+    res.json({ success: true, ...result });
   } catch (error) {
-    console.error('Error controlling relay:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to control relay',
-      message: error.message,
-      picoIp: PICO_IP,
-      hint: 'Set MOCK_MODE=true in .env to test without Pico W'
-    });
+    res.status(400).json({ error: error.message });
   }
 });
 
-// Toggle relay (convenience endpoint)
 app.post('/api/relay/toggle', async (req, res) => {
   try {
-    if (MOCK_MODE) {
-      // Mock response
-      const previousState = mockRelayState ? 'on' : 'off';
-      mockRelayState = !mockRelayState;
-      const newState = mockRelayState ? 'on' : 'off';
-      console.log(`Mock mode: relay toggled from ${previousState} to ${newState}`);
-      
-      // Publish to MQTT if enabled
-      publishRelayStatus(newState);
-      
-      return res.json({
-        success: true,
-        previousState: previousState,
-        newState: newState,
-        mock: true,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // First get current status
-    const statusResponse = await axios.get(`http://${PICO_IP}/api/relay`, {
-      timeout: 5000
-    });
-    
-    const currentState = statusResponse.data.state;
-    const newState = currentState === 'on' ? 'off' : 'on';
-
-    // Then toggle it
-    const controlResponse = await axios.post(
-      `http://${PICO_IP}/api/relay`,
-      { state: newState },
-      { 
-        timeout: 5000,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-
-    // Publish to MQTT if enabled
-    publishRelayStatus(newState);
-    
-    res.json({
-      success: true,
-      previousState: currentState,
-      newState: newState,
-      data: controlResponse.data
-    });
+    const nextState = !mockRelayState;
+    const result = await performRelayAction(nextState ? 'on' : 'off', { source: 'api-toggle' });
+    res.json({ success: true, previousState: result.state === 'on' ? 'off' : 'on', newState: result.state });
   } catch (error) {
-    console.error('Error toggling relay:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to toggle relay',
-      message: error.message,
-      picoIp: PICO_IP,
-      hint: 'Set MOCK_MODE=true in .env to test without Pico W'
-    });
+    res.status(500).json({ error: 'Failed to toggle relay', message: error.message });
   }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    message: err.message 
-  });
+// Scheduling endpoints
+app.get('/api/schedules', async (req, res) => {
+  if (!ensureStorageReady(res)) return;
+  const schedules = await storageAdapter.findAll({ createdAt: -1 });
+  res.json({ data: schedules });
 });
 
-// 404 handler
+app.post('/api/schedules', async (req, res) => {
+  if (!ensureStorageReady(res)) return;
+
+  try {
+    const { name, action, executeAt, timezone, notes } = req.body;
+
+    if (!action || !executeAt) {
+      return res.status(400).json({ error: 'action and executeAt are required' });
+    }
+
+    const tz = timezone || TIMEZONE;
+    const parsed = DateTime.fromISO(executeAt, { zone: tz });
+    if (!parsed.isValid) {
+      return res.status(400).json({ error: 'Invalid executeAt format' });
+    }
+
+    const snapshot = await timeService.fetchAuthoritativeTime(tz);
+    if (parsed.toJSDate() <= snapshot.now) {
+      return res.status(400).json({ error: 'Execute time must be in the future' });
+    }
+
+    const schedule = await storageAdapter.create({
+      name: name || `${action === 'on' ? 'เปิด' : 'ปิด'} @ ${parsed.setZone(tz).toFormat('fff')}`,
+      action: action.toLowerCase(),
+      executeAt: parsed.toUTC().toJSDate(),
+      timezone: tz,
+      status: 'pending',
+      metadata: {
+        createdBy: 'dashboard',
+        notes: notes || '',
+        requestedAt: snapshot.now
+      }
+    });
+
+    res.status(201).json({ success: true, data: schedule });
+  } catch (error) {
+    console.error('Error creating schedule:', error.message);
+    res.status(500).json({ error: 'Failed to create schedule', message: error.message });
+  }
+});
+
+app.patch('/api/schedules/:id/cancel', async (req, res) => {
+  if (!ensureStorageReady(res)) return;
+
+  try {
+    const existing = await storageAdapter.findById(req.params.id);
+    if (!existing || !['pending', 'processing'].includes(existing.status)) {
+      return res.status(404).json({ error: 'Schedule not found or already completed' });
+    }
+
+    const schedule = await storageAdapter.updateById(req.params.id, {
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString()
+    });
+
+    res.json({ success: true, data: schedule });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to cancel schedule', message: error.message });
+  }
+});
+
+app.delete('/api/schedules/:id', async (req, res) => {
+  if (!ensureStorageReady(res)) return;
+
+  try {
+    await storageAdapter.deleteById(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete schedule', message: error.message });
+  }
+});
+
+// Error handlers
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error', message: err.message });
+});
+
 app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
-// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Express backend running on http://localhost:${PORT}`);
-  
   if (MOCK_MODE) {
-    console.log(`🧪 MOCK MODE ENABLED - Simulating Pico W without hardware`);
-    console.log(`   (Set MOCK_MODE=false in .env to use real Pico W)`);
+    console.log('🧪 MOCK MODE ENABLED - Simulating Pico W without hardware');
   } else {
-    console.log(`📡 Configured to communicate with Pico W at ${PICO_IP}`);
+    console.log(`📡 Pico W target: ${PICO_IP}`);
   }
-  
+
   if (MQTT_ENABLED) {
-    console.log(`🌐 MQTT ENABLED - Connecting to broker at ${MQTT_BROKER}`);
-    console.log(`   Topics:`);
-    console.log(`   - Control: ${TOPICS.RELAY_CONTROL}`);
-    console.log(`   - Status:  ${TOPICS.RELAY_STATUS}`);
-    console.log(`   - System:  ${TOPICS.SYSTEM_STATUS}`);
+    console.log(`🌐 MQTT ENABLED - Broker ${MQTT_BROKER}`);
+    console.log('   Topics:', TOPICS);
   } else {
-    console.log(`⚠️  MQTT DISABLED - Set MQTT_ENABLED=true in .env to enable`);
+    console.log('⚠️  MQTT DISABLED - Set MQTT_ENABLED=true to enable');
   }
-  
-  console.log(`\nAvailable endpoints:`);
-  console.log(`  GET  /health - Health check`);
-  console.log(`  GET  /api/relay/status - Get relay status`);
-  console.log(`  POST /api/relay/control - Control relay (body: {"state": "on"|"off"})`);
-  console.log(`  POST /api/relay/toggle - Toggle relay state`);
+
+  if (!MONGODB_URI) {
+    console.log('⚠️  Scheduling disabled (missing MONGODB_URI)');
+  }
 });
 
 module.exports = app;

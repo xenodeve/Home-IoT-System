@@ -10,6 +10,8 @@ import socketpool
 import board
 import microcontroller
 import digitalio
+import rtc
+import struct
 from adafruit_httpserver.server import HTTPServer
 from adafruit_httpserver.request import HTTPRequest
 from adafruit_httpserver.response import HTTPResponse
@@ -31,6 +33,55 @@ Relay8 = digitalio.DigitalInOut(board.GP14)
 Relay8.direction = digitalio.Direction.OUTPUT
 relay_state = False  # Track relay state
 
+# --- NTP Time Sync ---
+def sync_time_with_ntp(pool, host="time.navy.mi.th"):
+    port = 123
+    buf = 1024
+    address = (host, port)
+    
+    print(f"🕒 Attempting to sync time with NTP server: {host}")
+
+    # Create NTP Packet
+    msg = bytearray(48)
+    msg[0] = 0b00100011  # LI, VN, Mode
+
+    try:
+        # Create a UDP socket
+        client = pool.socket(socketpool.AF_INET, socketpool.SOCK_DGRAM)
+        client.settimeout(5)
+        
+        # Send request
+        client.sendto(msg, address)
+        
+        # Wait for response
+        data, address = client.recvfrom(buf)
+        client.close()
+
+        # NTP Protocol: time is in bytes 40-43
+        t = struct.unpack("!I", data[40:44])[0]
+        
+        # NTP epoch is 1900, Unix/PC epoch is 1970.
+        # Difference is 2208988800 seconds.
+        t -= 2208988800
+        
+        # Add Thailand timezone offset (UTC+7 = 7 hours = 25200 seconds)
+        t += 25200
+        
+        # Set the RTC
+        rtc.RTC().datetime = time.localtime(t)
+        
+        current_time = time.localtime()
+        print("✅ Time synced successfully!")
+        print(f"📅 Current device time: {current_time.tm_mday}/{current_time.tm_mon}/{current_time.tm_year} {current_time.tm_hour:02}:{current_time.tm_min:02}:{current_time.tm_sec:02}")
+        return True
+
+    except OSError as e:
+        print(f"❌ NTP connection error: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ An error occurred during NTP sync: {e}")
+        return False
+
 # connect to network
 print()
 print("Connecting to WiFi")
@@ -41,6 +92,10 @@ wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_P
 
 print("Connected to WiFi")
 pool = socketpool.SocketPool(wifi.radio)
+
+# Sync time after connecting to WiFi
+sync_time_with_ntp(pool)
+
 server = HTTPServer(pool, "/static")
 
 
