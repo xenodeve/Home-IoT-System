@@ -1,0 +1,179 @@
+.date-dropdown {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.date-dropdown__label {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.date-dropdown__trigger {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  font-family: 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.date-dropdown__trigger:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.75);
+}
+
+.date-dropdown__trigger--open {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.date-dropdown__arrow {
+  transition: transform 0.2s ease;
+  color: #94a3b8;
+}
+
+.date-dropdown__trigger--open .date-dropdown__arrow {
+  transform: rotate(180deg);
+}
+
+.date-dropdown__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: linear-gradient(150deg, rgba(91, 33, 182, 0.92), rgba(14, 116, 144, 0.9));
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 20px 40px rgba(2, 6, 23, 0.6);
+  z-index: 1000;
+  animation: dateDropdownFade 180ms ease-out;
+  backdrop-filter: blur(16px);
+}
+
+@keyframes dateDropdownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.date-dropdown__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.date-dropdown__nav {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #e2e8f0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.date-dropdown__nav:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.date-dropdown__panel-title {
+  text-align: center;
+  line-height: 1.1;
+}
+
+.date-dropdown__panel-month {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.date-dropdown__panel-year {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.date-dropdown__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.7rem;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.date-dropdown__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+}
+
+.date-dropdown__day {
+  height: 36px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(15, 23, 42, 0.35);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.date-dropdown__day--prev,
+.date-dropdown__day--next {
+  color: rgba(226, 232, 240, 0.35);
+}
+
+.date-dropdown__day:hover {
+  transform: translateY(-2px);
+  background: rgba(56, 189, 248, 0.2);
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2);
+}
+
+.date-dropdown__day--today::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.7);
+}
+
+.date-dropdown__day--selected {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(14, 165, 233, 0.95));
+  color: #f8fafc;
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.35);
+}
+
+.date-dropdown__day--selected:hover {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 1), rgba(14, 165, 233, 1));
+}

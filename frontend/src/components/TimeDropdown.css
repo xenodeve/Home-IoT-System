@@ -1,0 +1,193 @@
+.time-dropdown {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.time-dropdown__label {
+  font-size: 0.875rem;
+  color: #94a3b8;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.time-dropdown__trigger {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  font-family: 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.time-dropdown__placeholder {
+  color: rgba(148, 163, 184, 0.6);
+}
+
+.time-dropdown__trigger:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.75);
+}
+
+.time-dropdown__trigger--open {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.time-dropdown__arrow {
+  transition: transform 0.2s ease;
+  color: #94a3b8;
+}
+
+.time-dropdown__trigger--open .time-dropdown__arrow {
+  transform: rotate(180deg);
+}
+
+.time-dropdown__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: linear-gradient(150deg, rgba(59, 130, 246, 0.92), rgba(14, 165, 233, 0.9));
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 20px 40px rgba(2, 6, 23, 0.6);
+  z-index: 1000;
+  animation: timeDropdownFade 180ms ease-out;
+  backdrop-filter: blur(16px);
+}
+
+@keyframes timeDropdownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.time-dropdown__panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.time-dropdown__panel-title {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.time-dropdown__panel-caption {
+  font-size: 0.75rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.time-dropdown__panel-selected {
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.time-dropdown__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.time-dropdown__column {
+  background: rgba(15, 23, 42, 0.25);
+  border-radius: 14px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+}
+
+.time-dropdown__column-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.time-dropdown__list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.time-dropdown__list--minutes {
+  grid-template-columns: repeat(3, 1fr);
+  max-height: 190px;
+}
+
+.time-dropdown__list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.time-dropdown__list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.25);
+  border-radius: 3px;
+}
+
+.time-dropdown__list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  border-radius: 3px;
+}
+
+.time-dropdown__list::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
+
+.time-dropdown__chip {
+  padding: 8px 4px;
+  width: 100%;
+  border-radius: 10px;
+  border: none;
+  background: rgba(15, 23, 42, 0.35);
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
+  text-align: center;
+}
+
+.time-dropdown__chip:hover {
+  transform: translateY(-2px);
+  background: rgba(56, 189, 248, 0.2);
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2);
+}
+
+.time-dropdown__chip--selected {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(14, 165, 233, 0.95));
+  color: #f8fafc;
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.35);
+}
+
+.time-dropdown__chip--selected:hover {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 1), rgba(14, 165, 233, 1));
+}

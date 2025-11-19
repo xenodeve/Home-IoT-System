@@ -466,6 +466,8 @@ input, select, textarea {
   font-family: 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   transition: all 0.2s ease;
 }
+
+
 input::placeholder, select::placeholder, textarea::placeholder {
   font-family: 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: rgba(148, 163, 184, 0.6);

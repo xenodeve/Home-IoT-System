@@ -5,6 +5,9 @@ import { MQTT_CONFIG } from '../config/mqttConfig'
 import { APP_CONFIG } from '../config/config'
 import Counter from './components/Counter'
 import { MagicBentoCard, MagicBentoGrid } from './components/MagicBento'
+import AnimatedSelect from './components/AnimatedSelect'
+import DateDropdown from './components/DateDropdown'
+import TimeDropdown from './components/TimeDropdown'
 import './App.css'
 
 const API_BASE = APP_CONFIG.API_BASE
@@ -499,31 +502,33 @@ function App() {
                   <input type="text" value={form.name} placeholder="เช่น เปิดไฟหน้าบ้าน" onChange={(e) => handleFormChange('name', e.target.value)} />
                 </div>
                 <div className="form-grid">
-                  <div>
-                    <label>วันที่</label>
-                    <input type="date" value={form.date} onChange={(e) => handleFormChange('date', e.target.value)} required />
-                  </div>
-                  <div>
-                    <label>เวลา</label>
-                    <input type="time" value={form.time} onChange={(e) => handleFormChange('time', e.target.value)} required />
-                  </div>
+                  <DateDropdown
+                    label="วันที่"
+                    value={form.date}
+                    onChange={(value) => handleFormChange('date', value)}
+                  />
+                  <TimeDropdown
+                    label="เวลา"
+                    value={form.time}
+                    onChange={(value) => handleFormChange('time', value)}
+                  />
                 </div>
                 <div className="form-grid">
-                  <div>
-                    <label>การทำงาน</label>
-                    <select value={form.action} onChange={(e) => handleFormChange('action', e.target.value)}>
-                      <option value="on">เปิด</option>
-                      <option value="off">ปิด</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>โซนเวลา</label>
-                    <select value={form.timezone} onChange={(e) => handleFormChange('timezone', e.target.value)}>
-                      {TIMEZONES.map((tz) => (
-                        <option key={tz} value={tz}>{tz}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <AnimatedSelect
+                    label="การทำงาน"
+                    value={form.action}
+                    onChange={(value) => handleFormChange('action', value)}
+                    options={[
+                      { value: 'on', label: 'เปิด' },
+                      { value: 'off', label: 'ปิด' }
+                    ]}
+                  />
+                  <AnimatedSelect
+                    label="โซนเวลา"
+                    value={form.timezone}
+                    onChange={(value) => handleFormChange('timezone', value)}
+                    options={TIMEZONES.map(tz => ({ value: tz, label: tz }))}
+                  />
                 </div>
                 <div className="form-row">
                   <label>หมายเหตุ</label>
