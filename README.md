@@ -15,7 +15,6 @@
 ```
 Home-IoT-System/
 ├── code.py              # CircuitPython สำหรับ Pico W (HTTP + MQTT auto-fallback)
-├── code_mqtt.py         # (Backup/Reference - ไม่จำเป็นต้องใช้)
 ├── settings.toml        # WiFi + MQTT config สำหรับ Pico W
 ├── MQTT_SETUP.md        # คู่มือการตั้งค่า MQTT
 ├── backend/             # Express.js backend
