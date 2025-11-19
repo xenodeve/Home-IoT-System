@@ -1,26 +1,29 @@
 """
-COMPANY: Cytron Technologies Sdn Bhd
-WEBSITE: www.cytron.io
-EMAIL: support@cytron.io
-
-REFERENCE:
-Code adapted from 2023 Liz Clark for Adafruit Industries:
-https://learn.adafruit.com/pico-w-http-server-with-circuitpython/code-the-pico-w-http-server
+Smart IoT Controller with auto-fallback
+- Tries to use MQTT if available
+- Falls back to HTTP-only mode if MQTT not available
 """
 import os
 import time
-import ipaddress
 import wifi
 import socketpool
 import board
 import microcontroller
 import digitalio
-from digitalio import DigitalInOut, Direction
 from adafruit_httpserver.server import HTTPServer
 from adafruit_httpserver.request import HTTPRequest
 from adafruit_httpserver.response import HTTPResponse
 from adafruit_httpserver.methods import HTTPMethod
 from adafruit_httpserver.mime_type import MIMEType
+
+# Try to import MQTT support
+try:
+    import adafruit_minimqtt.adafruit_minimqtt as MQTT
+    MQTT_AVAILABLE = True
+    print("✓ MQTT library found")
+except ImportError:
+    MQTT_AVAILABLE = False
+    print("⚠ MQTT library not found - running in HTTP-only mode")
 
 
 # Relay setup
@@ -43,104 +46,85 @@ server = HTTPServer(pool, "/static")
 
 def Relay_ON():
     global relay_state
-    print("Button Pressed: ON")
+    print("Relay: ON")
     Relay8.value = True
     relay_state = True
+    publish_status('on')
 
-def Realy_OFF():
+def Relay_OFF():
     global relay_state
-    print("Button Pressed: OFF")
+    print("Relay: OFF")
     Relay8.value = False
     relay_state = False
+    publish_status('off')
+
+def publish_status(state):
+    """Publish relay status to MQTT (if available)"""
+    if mqtt_client and MQTT_ENABLED:
+        try:
+            payload = f'{{"state": "{state}", "timestamp": "{time.monotonic()}", "source": "pico"}}'
+            mqtt_client.publish(TOPICS['STATUS'], payload)
+            print(f"✓ MQTT published: {state}")
+        except Exception as e:
+            print(f"⚠ MQTT publish error: {e}")
+
+def mqtt_message_received(client, topic, message):
+    """Callback when MQTT message is received"""
+    print(f"MQTT Message: {topic} = {message}")
     
+    if topic == TOPICS['CONTROL']:
+        try:
+            if '"on"' in message or "'on'" in message:
+                Relay_ON()
+            elif '"off"' in message or "'off'" in message:
+                Relay_OFF()
+        except Exception as e:
+            print(f"⚠ Error processing MQTT: {e}")
 
-# the HTML script
-def webpage():
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta http-equiv="Content-type" content="text/html;charset=utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script>
-    function buttonDown(button) {{
-        // Send a POST request to tell the Pico that the button was pressed
-        var xhttp = new XMLHttpRequest();
-        xhttp.open("POST", "/", true);
-        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-        xhttp.send(button + "=true");
-    }}
-    function buttonUp() {{
-        // Send a POST request to tell the Pico that the button was released (stop)
-        var xhttp = new XMLHttpRequest();
-        xhttp.open("POST", "/", true);
-        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-        xhttp.send("stop=true");
-    }}
-    </script>
-    <style>
-      h1 {{
-        text-align: center;
-      }}
-      body {{
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 80vh;
-        margin: 0;
-      }}
-      .controls {{
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-      }}
-      .button-on {{
-        font-size: 50px;
-        display: flex;
-        border-radius: 30px;   
-        align-items: center;
-        justify-content: center;
-        background-color: green;
-        color: black;
-        padding: 30px;
-        width: 80px;
-        height: 70px;
-      }}
-      .button-off {{
-        font-size: 50px;
-        display: flex;
-        border-radius: 30px;           
-        align-items: center;
-        justify-content: center;
-        background-color: grey;
-        color: black;
-        padding: 30px;
-        width: 80px;
-        height: 70px;
-      }}      
-    </style>
-    </head>
-    <body>
-<h1>Control Page</h1>
-<center><b>
-<div class="controls">      
-    <div></div>
-    <div class="button-on" id="ON_button" ontouchstart="buttonDown(this.id)" ontouchend="buttonUp()" 
-    onmousedown="buttonDown(this.id)" onmouseup="buttonUp()">ON</div>
-    <div></div>
-    
-    <div></div>
-    <div class="button-off" id="OFF_button" ontouchstart="buttonDown(this.id)" ontouchend="buttonUp()" 
-    onmousedown="buttonDown(this.id)" onmouseup="buttonUp()">OFF</div>
-    <div></div>
+# MQTT Configuration
+MQTT_BROKER = os.getenv('MQTT_BROKER', 'broker.hivemq.com')
+MQTT_PORT = int(os.getenv('MQTT_PORT', '1883'))
+MQTT_USERNAME = os.getenv('MQTT_USERNAME', '')
+MQTT_PASSWORD = os.getenv('MQTT_PASSWORD', '')
+MQTT_ENABLED = os.getenv('MQTT_ENABLED', 'false').lower() == 'true'
 
-    </div>
-    </body></html>
+TOPICS = {
+    'CONTROL': 'home-iot/relay/control',
+    'STATUS': 'home-iot/relay/status',
+    'DEVICE': 'home-iot/device/status'
+}
 
-    """
-    return html
+mqtt_client = None
 
+# Setup MQTT if enabled and available
+if MQTT_ENABLED and MQTT_AVAILABLE:
+    try:
+        mqtt_client = MQTT.MQTT(
+            broker=MQTT_BROKER,
+            port=MQTT_PORT,
+            socket_pool=pool,
+            ssl_context=None
+        )
+        
+        if MQTT_USERNAME and MQTT_PASSWORD:
+            mqtt_client.username = MQTT_USERNAME
+            mqtt_client.password = MQTT_PASSWORD
+        
+        mqtt_client.on_message = mqtt_message_received
+        
+        print(f"Connecting to MQTT broker: {MQTT_BROKER}")
+        mqtt_client.connect()
+        mqtt_client.subscribe(TOPICS['CONTROL'])
+        mqtt_client.publish(TOPICS['DEVICE'], '{"online": true}', retain=True)
+        
+        print(f"✓ MQTT enabled - subscribed to: {TOPICS['CONTROL']}")
+    except Exception as e:
+        print(f"⚠ MQTT setup failed: {e}")
+        print("→ Falling back to HTTP-only mode")
+        mqtt_client = None
+        MQTT_ENABLED = False
+else:
+    print("→ Running in HTTP-only mode")
 
 # API endpoint to get relay status (JSON)
 @server.route("/api/relay", method=HTTPMethod.GET)
@@ -160,7 +144,7 @@ def control_relay(request: HTTPRequest):
             Relay_ON()
             state = "on"
         elif '"off"' in raw_text or "'off'" in raw_text:
-            Realy_OFF()
+            Relay_OFF()
             state = "off"
         else:
             with HTTPResponse(request, content_type=MIMEType.TYPE_JSON) as response:
@@ -172,32 +156,6 @@ def control_relay(request: HTTPRequest):
     else:
         with HTTPResponse(request, content_type=MIMEType.TYPE_JSON) as response:
             response.send('{"error": "Missing state parameter", "success": false}')
-
-
-# route default static IP
-@server.route("/")
-def base(request: HTTPRequest):  
-    with HTTPResponse(request, content_type=MIMEType.TYPE_HTML) as response:
-        response.send(webpage())
-
-
-# if a button is pressed on the site
-@server.route("/", method=HTTPMethod.POST)
-def buttonpress(request: HTTPRequest):
-    # get the raw text
-    raw_text = request.raw_request.decode("utf8")
-
-    if "ON_button" in raw_text:
-        # turn on Relay
-        Relay_ON()
-    if "OFF_button" in raw_text:
-        # turn off Relay
-        Realy_OFF()
-        
-    # reload site
-    with HTTPResponse(request, content_type=MIMEType.TYPE_HTML) as response:
-        response.send(webpage())
-
 
 print("Starting server..")
 # startup the server
@@ -211,11 +169,31 @@ except OSError:
     microcontroller.reset()
 
 
+# Main loop
+last_mqtt_check = time.monotonic()
+MQTT_CHECK_INTERVAL = 1.0  # Check MQTT every 1 second
+
 while True:
     try:
-        # poll the server for incoming/outgoing requests
+        # Poll HTTP server
         server.poll()
+        
+        # Poll MQTT client if enabled
+        if mqtt_client and MQTT_ENABLED:
+            current_time = time.monotonic()
+            if current_time - last_mqtt_check >= MQTT_CHECK_INTERVAL:
+                try:
+                    mqtt_client.loop()
+                    last_mqtt_check = current_time
+                except Exception as e:
+                    print(f"⚠ MQTT loop error: {e}")
+                    # Try to reconnect
+                    try:
+                        mqtt_client.reconnect()
+                    except Exception:
+                        pass
+        
     except Exception as e:
-        print(e)
+        print(f"Main loop error: {e}")
         continue
 

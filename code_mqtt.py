@@ -126,88 +126,6 @@ if MQTT_ENABLED and MQTT_AVAILABLE:
 else:
     print("MQTT disabled or not available")
 
-# HTML webpage (same as before)
-def webpage():
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta http-equiv="Content-type" content="text/html;charset=utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script>
-    function buttonDown(button) {
-        var xhttp = new XMLHttpRequest();
-        xhttp.open("POST", "/", true);
-        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-        xhttp.send(button + "=true");
-    }
-    function buttonUp() {
-        var xhttp = new XMLHttpRequest();
-        xhttp.open("POST", "/", true);
-        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-        xhttp.send("stop=true");
-    }
-    </script>
-    <style>
-      h1 { text-align: center; }
-      body {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 80vh;
-        margin: 0;
-      }
-      .controls {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-      }
-      .button-on {
-        font-size: 50px;
-        display: flex;
-        border-radius: 30px;   
-        align-items: center;
-        justify-content: center;
-        background-color: green;
-        color: black;
-        padding: 30px;
-        width: 80px;
-        height: 70px;
-      }
-      .button-off {
-        font-size: 50px;
-        display: flex;
-        border-radius: 30px;           
-        align-items: center;
-        justify-content: center;
-        background-color: grey;
-        color: black;
-        padding: 30px;
-        width: 80px;
-        height: 70px;
-      }      
-    </style>
-    </head>
-    <body>
-<h1>Control Page</h1>
-<center><b>
-<div class="controls">      
-    <div></div>
-    <div class="button-on" id="ON_button" ontouchstart="buttonDown(this.id)" ontouchend="buttonUp()" 
-    onmousedown="buttonDown(this.id)" onmouseup="buttonUp()">ON</div>
-    <div></div>
-    
-    <div></div>
-    <div class="button-off" id="OFF_button" ontouchstart="buttonDown(this.id)" ontouchend="buttonUp()" 
-    onmousedown="buttonDown(this.id)" onmouseup="buttonUp()">OFF</div>
-    <div></div>
-
-    </div>
-    </body></html>
-    """
-    return html
-
 # API endpoint to get relay status (JSON)
 @server.route("/api/relay", method=HTTPMethod.GET)
 def get_relay_status(request: HTTPRequest):
@@ -236,25 +154,6 @@ def control_relay(request: HTTPRequest):
     else:
         with HTTPResponse(request, content_type=MIMEType.TYPE_JSON) as response:
             response.send('{"error": "Missing state parameter", "success": false}')
-
-# Route default static IP
-@server.route("/")
-def base(request: HTTPRequest):  
-    with HTTPResponse(request, content_type=MIMEType.TYPE_HTML) as response:
-        response.send(webpage())
-
-# If a button is pressed on the site
-@server.route("/", method=HTTPMethod.POST)
-def buttonpress(request: HTTPRequest):
-    raw_text = request.raw_request.decode("utf8")
-
-    if "ON_button" in raw_text:
-        Relay_ON()
-    if "OFF_button" in raw_text:
-        Relay_OFF()
-        
-    with HTTPResponse(request, content_type=MIMEType.TYPE_HTML) as response:
-        response.send(webpage())
 
 print("Starting server..")
 # Startup the server
@@ -287,7 +186,7 @@ while True:
                     # Try to reconnect
                     try:
                         mqtt_client.reconnect()
-                    except:
+                    except Exception:
                         pass
         
     except Exception as e:

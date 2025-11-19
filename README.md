@@ -14,9 +14,9 @@
 
 ```
 Home-IoT-System/
-├── code.py              # CircuitPython code สำหรับ Pico W (HTTP only)
-├── code_mqtt.py         # CircuitPython code สำหรับ Pico W (HTTP + MQTT)
-├── settings.toml        # WiFi config สำหรับ Pico W
+├── code.py              # CircuitPython สำหรับ Pico W (HTTP + MQTT auto-fallback)
+├── code_mqtt.py         # (Backup/Reference - ไม่จำเป็นต้องใช้)
+├── settings.toml        # WiFi + MQTT config สำหรับ Pico W
 ├── MQTT_SETUP.md        # คู่มือการตั้งค่า MQTT
 ├── backend/             # Express.js backend
 │   ├── server.js        # Express server + MQTT client
@@ -86,21 +86,37 @@ npm run dev
 #### 1. Setup Pico W
 
 1. ติดตั้ง CircuitPython บน Pico W
-2. ติดตั้ง `adafruit_minimqtt` library ใน `lib/` (ดาวน์โหลดจาก CircuitPython Bundle)
-3. เปลี่ยนชื่อ `code_mqtt.py` เป็น `code.py` แล้วคัดลอกไปยัง Pico W
+2. (Optional) ติดตั้ง `adafruit_minimqtt` library ใน `lib/` หากต้องการใช้ MQTT
+3. คัดลอก `code.py` ไปยัง Pico W
 4. คัดลอกโฟลเดอร์ `lib/` ทั้งหมดไปยัง Pico W
 5. สร้างไฟล์ `settings.toml` บน Pico W:
+   
+   **แบบ HTTP-only (ไม่ใช้ MQTT):**
+   ```toml
+   CIRCUITPY_WIFI_SSID = "ชื่อ WiFi"
+   CIRCUITPY_WIFI_PASSWORD = "รหัสผ่าน"
+   # MQTT_ENABLED = "false" (หรือไม่ต้องใส่)
+   ```
+   
+   **แบบ HTTP + MQTT (รองรับ remote access):**
    ```toml
    CIRCUITPY_WIFI_SSID = "ชื่อ WiFi"
    CIRCUITPY_WIFI_PASSWORD = "รหัสผ่าน"
    
-   # MQTT Settings
+   # MQTT Settings (ต้องตรงกับ backend/.env)
    MQTT_ENABLED = "true"
    MQTT_BROKER = "broker.hivemq.com"
    MQTT_PORT = "1883"
+   MQTT_USERNAME = ""
+   MQTT_PASSWORD = ""
    ```
+
 6. เชื่อมต่อรีเลย์กับ GPIO14 (GP14)
 7. จดไว้ว่า IP address ของ Pico W คือเท่าไร
+
+**หมายเหตุ:** `code.py` จะ **auto-detect** ว่ามี MQTT library หรือไม่
+- ถ้ามี + `MQTT_ENABLED="true"` → ทำงานแบบ HTTP + MQTT
+- ถ้าไม่มี library หรือ connection ล้มเหลว → auto-fallback เป็น HTTP-only
 
 #### 2. Setup Backend
 
@@ -162,14 +178,24 @@ home-iot/system/status        - Subscribe: รับสถานะ backend
 home-iot/device/status        - Subscribe: รับสถานะ Pico W
 ```
 
-### MQTT Brokers
+### MQTT Configuration
 
-**สำหรับทดสอบ (Public):**
-- `broker.hivemq.com:1883` (MQTT)
-- `broker.hivemq.com:8884` (WebSocket SSL)
+⚠️ **สำคัญ:** ต้องตั้งค่า MQTT ให้**ตรงกัน 3 ที่**:
+
+1. **`settings.toml`** (Pico W) - TCP port 1883
+2. **`backend/.env`** (Backend) - TCP port 1883
+3. **`frontend/src/mqttConfig.js`** (Frontend) - WebSocket port 8884
+
+**MQTT Brokers:**
+
+**สำหรับทดสอบ (Public - ไม่ต้อง authentication):**
+- Pico W: `broker.hivemq.com:1883` (MQTT TCP)
+- Backend: `mqtt://broker.hivemq.com:1883`
+- Frontend: `wss://broker.hivemq.com:8884/mqtt` (WebSocket SSL)
 
 **สำหรับ Production:**
 - ติดตั้ง Mosquitto บนเครื่องตัวเอง
+- ตั้งค่า authentication และ SSL
 - ดูรายละเอียดใน [MQTT_SETUP.md](MQTT_SETUP.md)
 
 ## 🎨 Features
@@ -198,10 +224,12 @@ home-iot/device/status        - Subscribe: รับสถานะ Pico W
 ### Pico W (CircuitPython)
 - ✅ WiFi connectivity
 - ✅ HTTP server + REST API
-- ✅ **MQTT Client (Pub/Sub)**
+- ✅ **MQTT Client (Pub/Sub) with auto-fallback**
 - ✅ Relay control
 - ✅ **รับคำสั่งจากทั้ง HTTP และ MQTT**
+- ✅ **Auto-detect MQTT library และ graceful degradation**
 - ✅ Auto-restart on errors
+- ✅ Single unified `code.py` for all scenarios
 
 ## 🔧 การ Deploy
 
@@ -260,10 +288,27 @@ npm run build
 - ดู console log ใน browser
 
 ### MQTT ไม่เชื่อมต่อ
+
+**Pico W:**
+- ตรวจสอบว่าติดตั้ง `adafruit_minimqtt` library แล้ว
+- ตรวจสอบ `MQTT_ENABLED="true"` ใน `settings.toml`
+- ดู serial console - ต้องเห็น "✓ MQTT enabled"
+- ถ้าเห็น "⚠ MQTT setup failed" → จะ auto-fallback เป็น HTTP-only
+
+**Backend:**
 - ตรวจสอบ `MQTT_ENABLED=true` ใน backend `.env`
-- Ping broker: `ping broker.hivemq.com`
+- ตรวจสอบ URL: `mqtt://broker.hivemq.com` (มี `mqtt://` prefix)
 - ดู console log - ต้องเห็น "📡 MQTT Connected"
+
+**Frontend:**
+- ตรวจสอบ URL: `wss://broker.hivemq.com:8884/mqtt` (WebSocket SSL)
+- ดู browser console - ต้องเห็น "✅ Frontend MQTT Connected"
+- Badge ต้องแสดง "✨ Real-time ON" สีเขียว
+
+**ทั่วไป:**
+- Ping broker: `ping broker.hivemq.com`
 - ลองใช้ MQTT Explorer เพื่อทดสอบ broker
+- ตรวจสอบว่า broker, port, topics **ตรงกันทั้ง 3 ที่**
 
 ### Frontend ไม่แสดง Real-time
 - ดู browser console - ต้องเห็น "✅ Frontend MQTT Connected"

@@ -1,2 +1,11 @@
-CIRCUITPY_WIFI_SSID = "YOUR WIFI" #ชื่อ WIFI
-CIRCUITPY_WIFI_PASSWORD = "YOUR PASSWORD" #รหัสผ่าน WIFI
+# WiFi Configuration
+CIRCUITPY_WIFI_SSID = "YOUR WIFI"        # ชื่อ WIFI
+CIRCUITPY_WIFI_PASSWORD = "YOUR PASSWORD" # รหัสผ่าน WIFI
+
+# MQTT Configuration (Optional - for remote access outside LAN)
+# ตั้งค่าให้ตรงกับ backend/.env เพื่อให้เชื่อมต่อ MQTT broker เดียวกัน
+MQTT_ENABLED = "false"                   # เปลี่ยนเป็น "true" เพื่อเปิดใช้ MQTT
+MQTT_BROKER = "broker.hivemq.com"        # MQTT broker address
+MQTT_PORT = "1883"                       # MQTT port (TCP)
+MQTT_USERNAME = ""                       # MQTT username (ถ้ามี)
+MQTT_PASSWORD = ""                       # MQTT password (ถ้ามี)
