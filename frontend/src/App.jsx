@@ -18,7 +18,8 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [isMockMode, setIsMockMode] = useState(false)
-  const [picoConnected, setPicoConnected] = useState(true)
+  const [backendConnected, setBackendConnected] = useState(true)
+  const [relayConnected, setRelayConnected] = useState(true)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [mqttStatus, setMqttStatus] = useState({ enabled: false, connected: false })
   const [frontendMqttConnected, setFrontendMqttConnected] = useState(false)
@@ -29,6 +30,12 @@ function App() {
   const [scheduleLoading, setScheduleLoading] = useState(false)
   const [creatingSchedule, setCreatingSchedule] = useState(false)
   const [schedulingAvailable, setSchedulingAvailable] = useState(true)
+  const [timeContentVisible, setTimeContentVisible] = useState(true)
+  const [relayBadgeVisible, setRelayBadgeVisible] = useState(true)
+  const [mqttBadgeVisible, setMqttBadgeVisible] = useState(true)
+  const prevBackendConnected = useRef(backendConnected)
+  const prevRelayConnected = useRef(relayConnected)
+  const prevFrontendMqttConnected = useRef(frontendMqttConnected)
 
   const [form, setForm] = useState({
     name: '',
@@ -83,6 +90,68 @@ function App() {
 
     return () => clearInterval(interval)
   }, [])
+
+  // Retry fetching schedules every 5 seconds when there's an error (only if backend is connected)
+  useEffect(() => {
+    if (scheduleError && backendConnected) {
+      const retryInterval = setInterval(() => {
+        console.log('🔄 พยายามโหลดกำหนดการอีกครั้ง...')
+        fetchSchedules(false)
+      }, 5000)
+
+      return () => clearInterval(retryInterval)
+    }
+  }, [scheduleError, backendConnected])
+
+  // Handle smooth transition when backend connection changes
+  useEffect(() => {
+    if (prevBackendConnected.current !== backendConnected) {
+      setTimeContentVisible(false)
+      const timer = setTimeout(() => {
+        setTimeContentVisible(true)
+        prevBackendConnected.current = backendConnected
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [backendConnected])
+
+  // Handle smooth transition when relay connection changes
+  useEffect(() => {
+    if (prevRelayConnected.current !== relayConnected) {
+      setRelayBadgeVisible(false)
+      const timer = setTimeout(() => {
+        setRelayBadgeVisible(true)
+        prevRelayConnected.current = relayConnected
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [relayConnected])
+
+  // Handle smooth transition when mqtt connection changes
+  useEffect(() => {
+    if (prevFrontendMqttConnected.current !== frontendMqttConnected) {
+      setMqttBadgeVisible(false)
+      const timer = setTimeout(() => {
+        setMqttBadgeVisible(true)
+        prevFrontendMqttConnected.current = frontendMqttConnected
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [frontendMqttConnected])
+
+  // Check backend status every 5 seconds (always check, faster reconnect when disconnected)
+  useEffect(() => {
+    const healthCheckInterval = setInterval(() => {
+      if (!backendConnected) {
+        console.log('🔄 พยายามเชื่อมต่อ Backend อีกครั้ง...')
+      } else if (!relayConnected) {
+        console.log('🔄 พยายามเชื่อมต่อ Relay อีกครั้ง...')
+      }
+      fetchRelayStatus()
+    }, 5000)
+
+    return () => clearInterval(healthCheckInterval)
+  }, [backendConnected, relayConnected])
 
   const fetchHealth = async () => {
     try {
@@ -145,22 +214,36 @@ function App() {
       const response = await axios.get(`${API_BASE}/relay/status`)
       setRelayState(response.data.state === 'on')
       setIsMockMode(response.data.mock || false)
-      setPicoConnected(response.data.connected !== false)
+      setBackendConnected(true)
+      setRelayConnected(response.data.connected !== false)
       setLastUpdate(new Date().toLocaleTimeString('th-TH'))
       setError(null)
+      // Restore MQTT client status when backend reconnects
+      if (mqttClientRef.current?.connected) {
+        setFrontendMqttConnected(true)
+      }
     } catch (err) {
       console.error('Error fetching relay status:', err)
       
       if (err.response?.status === 503) {
         // Pico W connection error
-        setPicoConnected(false)
-        setError(err.response.data?.error || 'ไม่สามารถเชื่อมต่อกับ Pico W ได้')
+        setBackendConnected(true)
+        setRelayConnected(false)
+        setError('ไม่สามารถเชื่อมต่อกับ Relay ได้')
+        // Restore MQTT client status
+        if (mqttClientRef.current?.connected) {
+          setFrontendMqttConnected(true)
+        }
       } else if (err.code === 'ERR_NETWORK' || !err.response) {
         // Backend connection error
-        setPicoConnected(false)
+        setBackendConnected(false)
+        setRelayConnected(false)
+        setFrontendMqttConnected(false)
         setError('ไม่สามารถเชื่อมต่อกับ Backend ได้')
       } else {
-        setPicoConnected(false)
+        setBackendConnected(false)
+        setRelayConnected(false)
+        setFrontendMqttConnected(false)
         setError('เกิดข้อผิดพลาดในการตรวจสอบสถานะ')
       }
     }
@@ -171,6 +254,7 @@ function App() {
     if (loading || state === relayState) return
 
     const previousState = relayState
+    const targetState = state ? 'on' : 'off'
     setRelayState(state)
 
     try {
@@ -180,18 +264,32 @@ function App() {
       if (frontendMqttConnected && mqttClientRef.current) {
         mqttClientRef.current.publish(
           MQTT_CONFIG.TOPICS.RELAY_CONTROL,
-          JSON.stringify({ state: state ? 'on' : 'off' }),
+          JSON.stringify({ state: targetState }),
           { qos: 1 }
         )
       } else {
-        await axios.post(`${API_BASE}/relay/control`, { state: state ? 'on' : 'off' })
+        await axios.post(`${API_BASE}/relay/control`, { state: targetState })
       }
 
-      // รอให้ MQTT ประมวลผลเสร็จก่อน unlock
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // รอให้ MQTT ประมวลผลเสร็จ
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // ตรวจสอบว่า relay เปลี่ยนสถานะจริงหรือไม่
+      const verifyResponse = await axios.get(`${API_BASE}/relay/status`)
+      const actualState = verifyResponse.data.state
+
+      if (actualState !== targetState) {
+        // สถานะไม่ตรงกับที่สั่ง - rollback
+        setRelayState(previousState)
+        setError('⚠️ เกิดข้อผิดพลาดไม่สามารถควบคุม Relay ได้')
+      }
     } catch (err) {
       setRelayState(previousState)
-      setError('เกิดข้อผิดพลาดในการควบคุมรีเลย์')
+      if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError('ไม่สามารถเชื่อมต่อกับ Backend ได้')
+      } else {
+        setError('เกิดข้อผิดพลาดในการควบคุมรีเลย์')
+      }
     } finally {
       setLoading(false)
     }
@@ -290,15 +388,29 @@ function App() {
           </div>
           <div className="badge-row">
             {isMockMode && <span className="chip chip--warning">🧪 Mock Mode</span>}
-            <span className={`chip ${picoConnected ? 'chip--success' : 'chip--danger'}`}>
-              {picoConnected ? '✅ Relay Connected' : '❌ Relay Disconnected'}
+            <span 
+              className={`chip ${relayConnected ? 'chip--success' : 'chip--danger'}`}
+              style={{
+                opacity: relayBadgeVisible ? 1 : 0,
+                transform: relayBadgeVisible ? 'scale(1)' : 'scale(0.95)',
+                transition: 'opacity 0.3s ease-out, transform 0.3s ease-out'
+              }}
+            >
+              {relayConnected ? '✅ Relay Connected' : '❌ Relay Disconnected'}
             </span>
             {mqttStatus?.enabled && (
               <span className={`chip ${mqttStatus.connected ? 'chip--success' : 'chip--danger'}`}>
                 {mqttStatus.connected ? '🌐 Backend MQTT Online' : '⚠️ Backend MQTT Offline'}
               </span>
             )}
-            <span className={`chip ${frontendMqttConnected ? 'chip--success' : 'chip--danger'}`}>
+            <span 
+              className={`chip ${frontendMqttConnected ? 'chip--success' : 'chip--danger'}`}
+              style={{
+                opacity: mqttBadgeVisible ? 1 : 0,
+                transform: mqttBadgeVisible ? 'scale(1)' : 'scale(0.95)',
+                transition: 'opacity 0.3s ease-out, transform 0.3s ease-out'
+              }}
+            >
               {frontendMqttConnected ? '✨ Real-time Sync' : '⏸️ Real-time paused'}
             </span>
           </div>
@@ -361,8 +473,18 @@ function App() {
               style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}
             >
               <p className="label">เวลามาตรฐาน</p>
-              {currentTime ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{
+                opacity: timeContentVisible ? 1 : 0,
+                transform: timeContentVisible ? 'scale(1)' : 'scale(0.98)',
+                transition: 'opacity 0.3s ease-out, transform 0.3s ease-out'
+              }}>
+                {!backendConnected ? (
+                  <div>
+                    <h3>ไม่มีการเชื่อมต่อ</h3>
+                    <small style={{ opacity: 0.7 }}>รอการเชื่อมต่อ backend</small>
+                  </div>
+                ) : currentTime ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Counter
                     value={currentTime.getHours()}
                     places={[10, 1]}
@@ -415,11 +537,14 @@ function App() {
                   />
                 </div>
               ) : (
-                <h3>กำลังซิงค์...</h3>
-              )}
-              <small style={{ marginTop: '4px', display: 'block', opacity: 0.7 }}>
-                source: {timeSnapshot?.source || 'system'}
-              </small>
+                  <h3>กำลังซิงค์...</h3>
+                )}
+                {backendConnected && (
+                  <small style={{ marginTop: '4px', display: 'block', opacity: 0.7 }}>
+                    source: {timeSnapshot?.source || 'system'}
+                  </small>
+                )}
+              </div>
             </MagicBentoCard>
           </section>
 
@@ -440,9 +565,14 @@ function App() {
               <h2>ควบคุมแบบเรียลไทม์</h2>
               <p>ส่งคำสั่งผ่าน MQTT หรือ REST API แบบอัตโนมัติ</p>
             </div>
-            {!picoConnected && (
+            {!backendConnected && (
+              <div className="alert alert--error" style={{ margin: '0 0 1rem 0' }}>
+                🚫 ไม่สามารถเชื่อมต่อกับ Backend ได้ - กรุณาตรวจสอบเซิร์ฟเวอร์
+              </div>
+            )}
+            {!relayConnected && backendConnected && (
               <div className="alert alert--warning" style={{ margin: '0 0 1rem 0' }}>
-                ⚠️ ไม่สามารถเชื่อมต่อกับส่วน Relay ของ Raspberry Pi Pico W ได้ - กรุณาตรวจสอบอุปกรณ์
+                ⚠️ ไม่สามารถเชื่อมต่อกับ Relay ได้ - กรุณาตรวจสอบอุปกรณ์ Raspberry Pi Pico Wireless
               </div>
             )}
             
@@ -457,14 +587,14 @@ function App() {
             </div>
 
             <div className="control-toggle">
-              <label className={`relay-switch${loading || !picoConnected ? ' is-disabled' : ''}${loading ? ' is-busy' : ''}`}>
+              <label className={`relay-switch${loading || !relayConnected ? ' is-disabled' : ''}${loading ? ' is-busy' : ''}`}>
                 <input
                   className="relay-switch__input l"
                   type="checkbox"
                   role="switch"
                   aria-checked={relayState}
                   checked={relayState}
-                  disabled={loading || !picoConnected}
+                  disabled={loading || !relayConnected}
                   onChange={(event) => controlRelay(event.target.checked)}
                 />
                 <span className="relay-switch__track">
@@ -472,7 +602,7 @@ function App() {
                 </span>
                 <span className="relay-switch__text">
                   <span className="relay-switch__title">{relayState ? 'รีเลย์ทำงานอยู่' : 'รีเลย์ปิดอยู่'}</span>
-                  <span className="relay-switch__hint">{loading ? 'กำลังส่งคำสั่ง...' : picoConnected ? 'แตะเพื่อสลับสถานะ' : 'อุปกรณ์ไม่พร้อมใช้งาน'}</span>
+                  <span className="relay-switch__hint">{loading ? 'กำลังส่งคำสั่ง...' : relayConnected ? 'แตะเพื่อสลับสถานะ' : 'อุปกรณ์ไม่พร้อมใช้งาน'}</span>
                 </span>
               </label>
             </div>
@@ -627,8 +757,8 @@ function App() {
           </section>
         </MagicBentoGrid>
 
-        {error && <div className="alert alert--error">⚠️ {error}</div>}
-        {scheduleError && <div className="alert alert--error">⚠️ {scheduleError}</div>}
+        {error && error !== 'ไม่สามารถเชื่อมต่อกับ Relay ได้' && <div className="alert alert--error">⚠️ {error}</div>}
+        {scheduleError && backendConnected && <div className="alert alert--error">⚠️ {scheduleError}</div>}
       </div>
     </div>
   )

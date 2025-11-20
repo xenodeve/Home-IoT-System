@@ -53,6 +53,13 @@ let mongoConnected = false;
 let schedulerManager = null;
 let storageAdapter = null;
 
+// Relay status cache
+let relayStatusCache = {
+  data: null,
+  timestamp: 0,
+  ttl: 1000 // 1 second cache
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -204,6 +211,9 @@ async function performRelayAction(targetState, context = {}) {
     throw new Error('Invalid relay state');
   }
 
+  // Clear cache when relay state changes
+  relayStatusCache.data = null;
+
   if (MOCK_MODE) {
     mockRelayState = state === 'on';
     console.log(`🧪 Mock relay set to ${state} (${context.source || 'api'})`);
@@ -290,12 +300,29 @@ app.get('/api/time/now', async (req, res) => {
 
 app.get('/api/relay/status', async (req, res) => {
   try {
+    const now = Date.now();
+    
+    // Return cached data if still valid
+    if (relayStatusCache.data && (now - relayStatusCache.timestamp) < relayStatusCache.ttl) {
+      console.log('💾 Returning cached relay status');
+      return res.json(relayStatusCache.data);
+    }
+
     if (MOCK_MODE) {
-      return res.json({ state: mockRelayState ? 'on' : 'off', success: true, mock: true, connected: true });
+      const mockData = { state: mockRelayState ? 'on' : 'off', success: true, mock: true, connected: true };
+      relayStatusCache.data = mockData;
+      relayStatusCache.timestamp = now;
+      return res.json(mockData);
     }
 
     const response = await axios.get(`http://${PICO_IP}/api/relay`, { timeout: 5000 });
-    res.json({ ...response.data, connected: true, picoIp: PICO_IP });
+    const responseData = { ...response.data, connected: true, picoIp: PICO_IP };
+    
+    // Cache the successful response
+    relayStatusCache.data = responseData;
+    relayStatusCache.timestamp = now;
+    
+    res.json(responseData);
   } catch (error) {
     console.error('Error getting relay status:', error.message);
     
@@ -303,6 +330,9 @@ app.get('/api/relay/status', async (req, res) => {
                               error.code === 'ETIMEDOUT' || 
                               error.code === 'ENOTFOUND' ||
                               error.code === 'ECONNRESET';
+    
+    // Don't cache errors
+    relayStatusCache.data = null;
     
     res.status(503).json({ 
       success: false,
