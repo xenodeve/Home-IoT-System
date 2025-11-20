@@ -10,36 +10,171 @@
 2. **Express Backend**: Gateway API, MQTT client, scheduler service และ mock mode สำหรับทดสอบ
 3. **React Frontend**: Professional dashboard UI พร้อม real-time updates, animated counter clock, และ scheduling interface
 
+## 🏛️ System Architecture
+
+### Same-LAN Deployment (Development/Local Network)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Local Network (192.168.x.x)              │
+│                                                                  │
+│  ┌──────────────┐      HTTP API       ┌──────────────┐          │
+│  │              │◄────────────────────►│              │          │
+│  │   Pico W     │                      │   Backend    │          │
+│  │ (code.py)    │                      │ (Express.js) │          │
+│  │              │◄─────────────────────┤              │          │
+│  │  GPIO14      │    MQTT (Optional)   │  Port 3001   │          │
+│  │  Relay       │                      │              │          │
+│  └──────────────┘                      └───────┬──────┘          │
+│         ▲                                      │                 │
+│         │                                      │ REST API        │
+│         │                                      ▼                 │
+│         │                              ┌──────────────┐          │
+│         │                              │   Frontend   │          │
+│         │                              │  (React +    │          │
+│         └──────────Real-time───────────┤   Vite)      │          │
+│                   Status Update        │  Port 3000   │          │
+│                                        └──────────────┘          │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+                           │
+                           │ MQTT WebSocket (Optional)
+                           ▼
+                  ┌─────────────────┐
+                  │  Public MQTT     │
+                  │    Broker        │
+                  │ broker.hivemq.com│
+                  └─────────────────┘
+```
+
+### Cross-LAN Deployment (Production/Remote Access)
+```
+┌────────────────────────┐                    ┌────────────────────────┐
+│   Home Network         │                    │   Cloud/VPS/Internet   │
+│   (192.168.1.x)        │                    │                        │
+│                        │                    │                        │
+│  ┌──────────────┐      │                    │  ┌──────────────┐      │
+│  │   Pico W     │      │   MQTT Pub/Sub     │  │   Backend    │      │
+│  │  (code.py)   │◄─────┼────────────────────┼─►│ (Express.js) │      │
+│  │              │      │                    │  │              │      │
+│  │  GPIO14      │      │                    │  │  MongoDB     │      │
+│  │  Relay       │      │                    │  │  Atlas       │      │
+│  └──────────────┘      │                    │  └───────┬──────┘      │
+│         ▲              │                    │          │             │
+│         │              │                    │          │ HTTPS API   │
+│         │              │                    │          ▼             │
+│         │              │                    │  ┌──────────────┐      │
+│         │              │                    │  │   Frontend   │      │
+│         │              │   MQTT WebSocket   │  │  (React +    │      │
+│         └──────────────┼────────────────────┼──┤   Vite)      │      │
+│            Real-time   │                    │  │              │      │
+│            Status      │                    │  └──────────────┘      │
+│                        │                    │                        │
+└────────────────────────┘                    └────────────────────────┘
+                 │                                      │
+                 │           ┌─────────────────┐        │
+                 └───────────►  Public MQTT     ◄───────┘
+                             │    Broker        │
+                             │ broker.hivemq.com│
+                             │  Port: 1883 (TCP)│
+                             │  Port: 8884 (WSS)│
+                             └─────────────────┘
+```
+
+### Communication Flow
+```
+1. Control Command:
+   User → Frontend (React) → Backend (Express) → MQTT Broker
+                                                       ↓
+                                              Pico W → Relay ON/OFF
+
+2. Status Update (Real-time):
+   Relay → Pico W → MQTT Broker → Frontend (WebSocket) → UI Update
+                          ↓
+                    Backend (Subscribe) → Database (Schedule Sync)
+
+3. Scheduled Task:
+   Scheduler (Backend) → Check Time → Execute → MQTT Broker → Pico W → Relay
+```
+
+### Technology Stack per Component
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Pico W (IoT Device)                                                 │
+│ • CircuitPython 9.x                                                 │
+│ • adafruit_httpserver (REST API)                                    │
+│ • adafruit_minimqtt (MQTT Client - TCP port 1883)                  │
+│ • NTP Client (time.navy.mi.th)                                      │
+│ • GPIO Control (digitalio)                                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Backend (Express.js)                                                │
+│ • Node.js + Express 4                                               │
+│ • MQTT.js (TCP Client - port 1883)                                  │
+│ • Mongoose (MongoDB Atlas)                                          │
+│ • Luxon (Timezone handling)                                         │
+│ • Axios (HTTP Client)                                               │
+│ • node-cron (Scheduler - every 10s)                                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Frontend (React)                                                    │
+│ • React 18 + Vite 6                                                 │
+│ • MQTT.js (WebSocket Client - port 8884)                            │
+│ • GSAP 3.13 (Animations)                                            │
+│ • Axios (REST API)                                                  │
+│ • Custom Components (MagicBento, AnimatedSelect, Dropdowns)         │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ Infrastructure                                                      │
+│ • MQTT Broker: HiveMQ Public (broker.hivemq.com)                    │
+│ • Database: MongoDB Atlas (Cloud)                                   │
+│ • Time Service: worldtimeapi.org / Thai Navy NTP                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
 ## 🏗️ โครงสร้างโปรเจ็กต์
 
 ```
 Home-IoT-System/
-├── code.py              # CircuitPython สำหรับ Pico W (HTTP + MQTT + NTP sync)
-├── settings.toml        # WiFi + MQTT config สำหรับ Pico W
-├── test_ntp.py          # ทดสอบ NTP time sync
-├── MQTT_SETUP.md        # คู่มือการตั้งค่า MQTT
-├── backend/             # Express.js backend
-│   ├── server.js        # Express server + MQTT + Scheduler
-│   ├── models/          # Mongoose models (Schedule)
-│   ├── services/        # Time service (multi-provider NTP) + scheduler loop
-│   ├── data/            # JSON file storage (fallback)
+├── code.py                    # CircuitPython สำหรับ Pico W (HTTP + MQTT + NTP sync)
+├── settings.toml              # WiFi + MQTT config สำหรับ Pico W
+├── test_ntp.py                # ทดสอบ NTP time sync
+├── MQTT_SETUP.md              # คู่มือการตั้งค่า MQTT
+├── backend/                   # Express.js backend
+│   ├── server.js              # Express server + MQTT + Scheduler
+│   ├── models/                # Mongoose models (Schedule)
+│   ├── services/              # Time service (multi-provider NTP) + scheduler loop
+│   ├── data/                  # JSON file storage (fallback)
 │   ├── package.json
-│   ├── .env.example
+│   ├── .env.example           # ตัวอย่างการตั้งค่า environment variables
 │   └── README.md
-├── frontend/            # React frontend
+├── frontend/                  # React frontend
 │   ├── src/
-│   │   ├── App.jsx      # Professional dashboard + scheduler UI
-│   │   ├── App.css      # Modern dark theme styling
-│   │   ├── mqttConfig.js # MQTT configuration
-│   │   ├── config.js    # App configuration (intervals, timezones)
+│   │   ├── App.jsx            # Professional dashboard + scheduler UI
+│   │   ├── App.css            # Modern dark theme styling
+│   │   ├── main.jsx           # Entry point
+│   │   ├── index.css          # Global styles
 │   │   └── components/
-│   │       └── Counter.jsx # Animated rolling counter
+│   │       ├── Counter.jsx    # Animated rolling counter (GSAP)
+│   │       ├── MagicBento.jsx # Interactive card system with effects
+│   │       ├── MagicBento.css # Styling for particle effects and border glow
+│   │       ├── AnimatedSelect.jsx    # Custom select dropdown with rotateX animation
+│   │       ├── AnimatedSelect.css    # Select dropdown styling
+│   │       ├── DateDropdown.jsx      # Custom date picker with calendar UI
+│   │       ├── DateDropdown.css      # Date picker styling
+│   │       ├── TimeDropdown.jsx      # Custom time picker (24-hour format)
+│   │       └── TimeDropdown.css      # Time picker styling
 │   ├── config/
-│   │   └── config.js    # Centralized configuration
+│   │   ├── config.js          # Centralized configuration (intervals, timezones, API)
+│   │   └── mqttConfig.js      # MQTT WebSocket configuration
 │   ├── package.json
 │   ├── vite.config.js
+│   ├── .env.example           # ตัวอย่างการตั้งค่า environment variables (Cross-LAN)
 │   └── README.md
-└── lib/                 # Adafruit libraries สำหรับ Pico W
+└── lib/                       # Adafruit libraries สำหรับ Pico W
+    └── adafruit_httpserver/   # HTTP server library
 ```
 
 ## 🚀 Quick Start
@@ -287,11 +422,50 @@ npm run build
 - ตั้งค่า MQTT broker (Mosquitto/HiveMQ Cloud)
 - Frontend เชื่อมต่อ MQTT ผ่าน WebSocket
 
-### Option 4: ควบคุมจากภายนอก LAN
-1. ติดตั้ง Mosquitto broker บน VPS/Cloud
-2. เปิด port 1883 (MQTT) และ 8884 (WebSocket)
-3. ตั้งค่า authentication
-4. ใช้ mobile MQTT client app ควบคุมจากทุกที่
+### Option 4: Cross-LAN Deployment (Pico W อยู่บ้าน, Backend+Frontend อยู่ Cloud)
+
+**ระบบรองรับ Cross-LAN แล้ว!** คุณสามารถควบคุม Pico W ที่บ้านจาก Backend+Frontend ที่อยู่บน Cloud/VPS ได้
+
+#### การตั้งค่า:
+
+**1. Pico W (บ้าน):**
+```toml
+# settings.toml
+MQTT_ENABLED = "true"
+MQTT_BROKER = "broker.hivemq.com"
+MQTT_PORT = "1883"
+```
+
+**2. Backend (Cloud/VPS):**
+```env
+# .env
+MQTT_ENABLED=true
+MQTT_BROKER=mqtt://broker.hivemq.com
+MQTT_PORT=1883
+MONGODB_URI=mongodb+srv://your-atlas-cluster
+```
+
+**3. Frontend (Cloud/VPS):**
+```env
+# .env
+VITE_API_BASE=https://your-backend-domain.com/api
+```
+
+#### การสื่อสาร:
+```
+Pico W (บ้าน) ←→ MQTT Broker (Internet) ←→ Backend (Cloud)
+                                             ↑
+                                        Frontend (Cloud)
+```
+
+#### ข้อควรระวัง (Security):
+- ปัจจุบันใช้ Public MQTT Broker (broker.hivemq.com) ที่ไม่มี authentication
+- สำหรับ Production แนะนำใช้:
+  - HiveMQ Cloud (มี free tier) + username/password
+  - หรือติดตั้ง Mosquitto บน VPS ของคุณเอง พร้อม SSL/TLS
+
+#### ดูรายละเอียดเพิ่มเติม:
+- [MQTT_SETUP.md](MQTT_SETUP.md) - คู่มือการตั้งค่า MQTT broker และทดสอบ
 
 ## 🛠️ Tech Stack
 

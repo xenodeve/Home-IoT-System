@@ -1,7 +1,9 @@
 // Application configuration constants
 export const APP_CONFIG = {
   // API endpoints
-  API_BASE: '/api',
+  // For Cross-LAN: Set VITE_API_BASE in .env to full URL (e.g., https://your-backend.com/api)
+  // For Same-LAN: Use default '/api' (relative path)
+  API_BASE: import.meta.env.VITE_API_BASE || '/api',
   
   // Polling intervals (in milliseconds)
   TIME_SYNC_INTERVAL: 10000,        // ดึงข้อมูลเวลาใหม่ทุก 10 วินาทีจาก Backend
