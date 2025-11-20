@@ -158,6 +158,12 @@ if (MQTT_ENABLED) {
 
     try {
       const payload = JSON.parse(message.toString());
+      
+      // ป้องกัน loop: ข้าม message ที่มาจาก backend เอง
+      if (payload?.source === 'backend' || payload?.source === 'mqtt-control') {
+        return;
+      }
+      
       if (payload?.state) {
         await performRelayAction(payload.state, { source: 'mqtt-control' });
       }
@@ -211,7 +217,7 @@ async function performRelayAction(targetState, context = {}) {
       const controlPayload = JSON.stringify({ 
         state,
         timestamp: new Date().toISOString(),
-        source: context.source || 'backend',
+        source: 'backend',  // ระบุว่ามาจาก backend เพื่อป้องกัน loop
         scheduleId: context.scheduleId || null
       });
       

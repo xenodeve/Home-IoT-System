@@ -167,7 +167,8 @@ function App() {
   }
 
   const controlRelay = async (state) => {
-    if (loading) return
+    // ป้องกันการส่งคำสั่งซ้ำถ้า state เท่าเดิม
+    if (loading || state === relayState) return
 
     const previousState = relayState
     setRelayState(state)
@@ -185,6 +186,9 @@ function App() {
       } else {
         await axios.post(`${API_BASE}/relay/control`, { state: state ? 'on' : 'off' })
       }
+
+      // รอให้ MQTT ประมวลผลเสร็จก่อน unlock
+      await new Promise(resolve => setTimeout(resolve, 100))
     } catch (err) {
       setRelayState(previousState)
       setError('เกิดข้อผิดพลาดในการควบคุมรีเลย์')

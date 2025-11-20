@@ -101,14 +101,14 @@ server = HTTPServer(pool, "/static")
 
 def Relay_ON():
     global relay_state
-    print("Relay: ON")
+    print("🔴 Relay: ON")
     Relay8.value = True
     relay_state = True
     publish_status('on')
 
 def Relay_OFF():
     global relay_state
-    print("Relay: OFF")
+    print("⚫ Relay: OFF")
     Relay8.value = False
     relay_state = False
     publish_status('off')
@@ -119,20 +119,33 @@ def publish_status(state):
         try:
             payload = f'{{"state": "{state}", "timestamp": "{time.monotonic()}", "source": "pico"}}'
             mqtt_client.publish(TOPICS['STATUS'], payload)
-            print(f"✓ MQTT published: {state}")
+            print(f"✅ MQTT status published: {state} → {TOPICS['STATUS']}")
         except Exception as e:
             print(f"⚠ MQTT publish error: {e}")
+    else:
+        print(f"⚠️ MQTT not available for status publish")
 
 def mqtt_message_received(client, topic, message):
     """Callback when MQTT message is received"""
-    print(f"MQTT Message: {topic} = {message}")
+    print(f"📨 MQTT Message received: {topic} = {message}")
     
     if topic == TOPICS['CONTROL']:
         try:
+            # ป้องกัน loop: ข้าม message ที่มาจาก backend เอง
+            if '"source"' in message and ('"backend"' in message or '"mqtt-control"' in message):
+                print("⏭️  Skipping message from backend (loop prevention)")
+                return
+            
+            print(f"📦 Processing command...")
+            
             if '"on"' in message or "'on'" in message:
+                print("🎯 Command: ON")
                 Relay_ON()
             elif '"off"' in message or "'off'" in message:
+                print("🎯 Command: OFF")
                 Relay_OFF()
+            else:
+                print(f"⚠️ Unknown command in message")
         except Exception as e:
             print(f"⚠ Error processing MQTT: {e}")
 

@@ -99,6 +99,15 @@
 ### Technology Stack per Component
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
+│ Pico W Simulator (Python)                                           │
+│ • Python 3.x                                                        │
+│ • Flask (HTTP Server)                                               │
+│ • paho-mqtt (MQTT Client - TCP port 1883)                           │
+│ • ntplib (NTP Client - time.navy.mi.th)                             │
+│ • threading (Concurrent HTTP + MQTT)                                │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
 │ Pico W (IoT Device)                                                 │
 │ • CircuitPython 9.x                                                 │
 │ • adafruit_httpserver (REST API)                                    │
@@ -139,6 +148,8 @@
 ```
 Home-IoT-System/
 ├── code.py                    # CircuitPython สำหรับ Pico W (HTTP + MQTT + NTP sync)
+├── pico_simulator.py         # Python simulator สำหรับทดสอบ Pico W โดยไม่ต้องมีฮาร์ดแวร์จริง
+├── requirements_simulator.txt # Dependencies สำหรับ Pico W simulator
 ├── settings.toml              # WiFi + MQTT config สำหรับ Pico W
 ├── test_ntp.py                # ทดสอบ NTP time sync
 ├── MQTT_SETUP.md              # คู่มือการตั้งค่า MQTT
@@ -209,7 +220,44 @@ npm start
 📡 MQTT Connected to broker
 ```
 
-#### 2. เริ่ม Frontend
+#### 2. เริ่ม Pico W Simulator (แทน Pico W จริง)
+
+```cmd
+pip install -r requirements_simulator.txt
+```
+
+ตั้งค่า environment variables (เหมือน settings.toml):
+```cmd
+# Windows
+set MQTT_ENABLED=true
+set MQTT_BROKER=broker.hivemq.com
+set MQTT_PORT=1883
+
+# Linux/Mac
+export MQTT_ENABLED=true
+export MQTT_BROKER=broker.hivemq.com
+export MQTT_PORT=1883
+```
+
+รัน simulator:
+```cmd
+python pico_simulator.py
+```
+
+คุณจะเห็น:
+```
+🚀 Starting Pico W Simulator...
+🕒 Attempting to sync time with NTP server: time.navy.mi.th
+✅ Time synced successfully!
+📡 MQTT Connected to broker: broker.hivemq.com
+📨 Subscribed to: home-iot/relay/control
+🌐 Starting HTTP server on http://localhost:5000
+✅ Pico W Simulator is running!
+📡 HTTP API: http://localhost:5000/api/relay
+🌐 Web Interface: http://localhost:5000
+```
+
+#### 3. เริ่ม Frontend
 
 ```cmd
 cd frontend
@@ -223,9 +271,26 @@ npm run dev
 - ✨ **Real-time ON** (สีเขียว) - MQTT WebSocket เชื่อมต่อแล้ว
 - 🌐 **Backend MQTT** (สีเขียว) - Backend เชื่อมต่อ MQTT broker
 
-#### 3. ทดสอบ Real-time Updates
+#### 4. ทดสอบการทำงาน
 
-เปิดหลายแท็บหรือหลายเครื่อง ลองกดปุ่ม ON/OFF - **ทุกแท็บจะอัพเดทพร้อมกันทันที!** ⚡
+**ทดสอบผ่าน Web Interface:**
+- เปิด `http://localhost:5000` ในบราวเซอร์
+- กดปุ่ม ON/OFF เพื่อควบคุม relay จำลอง
+
+**ทดสอบผ่าน API:**
+```bash
+# ดูสถานะ
+curl http://localhost:5000/api/relay
+
+# เปิด relay
+curl -X POST http://localhost:5000/api/relay -H "Content-Type: application/json" -d '{"state": "on"}'
+
+# ปิด relay
+curl -X POST http://localhost:5000/api/relay -H "Content-Type: application/json" -d '{"state": "off"}'
+```
+
+**ทดสอบ Real-time Sync:**
+เปิดหลายแท็บ Frontend แล้วลองควบคุม relay - **ทุกแท็บจะอัพเดทพร้อมกันทันที!** ⚡
 
 ### การใช้งานจริงกับ Pico W
 
@@ -506,6 +571,10 @@ Pico W (บ้าน) ←→ MQTT Broker (Internet) ←→ Backend (Cloud)
 ## 📚 Documentation
 
 ดูรายละเอียดเพิ่มเติมใน:
+- `code.py` - CircuitPython สำหรับ Pico W (HTTP + MQTT + NTP sync)
+- `pico_simulator.py` - Python simulator สำหรับทดสอบ Pico W โดยไม่ต้องมีฮาร์ดแวร์จริง
+- `requirements_simulator.txt` - Dependencies สำหรับ Pico W simulator
+- `settings.toml` - WiFi + MQTT config สำหรับ Pico W
 - [Backend README](backend/README.md) - Express server + MQTT setup
 - `backend/models/Schedule.js` - โครงสร้างกำหนดการบน MongoDB
 - `backend/services/timeService.js` - Multi-provider NTP/HTTP time sync (Thai Navy primary)
