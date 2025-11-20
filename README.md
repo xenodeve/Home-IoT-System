@@ -156,36 +156,56 @@ Home-IoT-System/
 ├── backend/                   # Express.js backend
 │   ├── server.js              # Express server + MQTT + Scheduler
 │   ├── models/                # Mongoose models (Schedule)
+│   │   └── Schedule.js        # โมเดลกำหนดการสำหรับ MongoDB
 │   ├── services/              # Time service (multi-provider NTP) + scheduler loop
-│   ├── data/                  # JSON file storage (fallback)
+│   │   ├── fileStorage.js     # ที่เก็บข้อมูล JSON สำรองสำหรับการพัฒนา
+│   │   ├── mongoStorage.js    # บูรณาการ MongoDB สำหรับการใช้งานจริง
+│   │   ├── scheduler.js       # ลูปการทำงานอัตโนมัติของตัวกำหนดเวลา
+│   │   └── timeService.js     # การซิงค์เวลา NTP/HTTP หลายผู้ให้บริการ (Thai Navy เป็นหลัก)
+│   ├── data/                  # ที่เก็บไฟล์ JSON (fallback)
+│   │   └── schedules.json     # ที่เก็บกำหนดการในเครื่อง
 │   ├── package.json
 │   ├── .env.example           # ตัวอย่างการตั้งค่า environment variables
 │   └── README.md
 ├── frontend/                  # React frontend
+│   ├── index.html             # จุดเริ่มต้น HTML
 │   ├── src/
 │   │   ├── App.jsx            # Professional dashboard + scheduler UI
 │   │   ├── App.css            # Modern dark theme styling
-│   │   ├── main.jsx           # Entry point
-│   │   ├── index.css          # Global styles
+│   │   ├── main.jsx           # จุดเริ่มต้น
+│   │   ├── index.css          # สไตล์ส่วนกลาง
 │   │   └── components/
-│   │       ├── Counter.jsx    # Animated rolling counter (GSAP)
-│   │       ├── MagicBento.jsx # Interactive card system with effects
-│   │       ├── MagicBento.css # Styling for particle effects and border glow
-│   │       ├── AnimatedSelect.jsx    # Custom select dropdown with rotateX animation
-│   │       ├── AnimatedSelect.css    # Select dropdown styling
-│   │       ├── DateDropdown.jsx      # Custom date picker with calendar UI
-│   │       ├── DateDropdown.css      # Date picker styling
-│   │       ├── TimeDropdown.jsx      # Custom time picker (24-hour format)
-│   │       └── TimeDropdown.css      # Time picker styling
+│   │       ├── Counter.jsx    # นาฬิกานับแบบหมุนเคลื่อนไหว (GSAP)
+│   │       ├── MagicBento.jsx # ระบบการ์ดแบบโต้ตอบพร้อมเอฟเฟกต์
+│   │       ├── MagicBento.css # สไตล์สำหรับเอฟเฟกต์อนุภาคและขอบเรืองแสง
+│   │       ├── AnimatedSelect.jsx    # ดรอปดาวน์เลือกแบบกำหนดเองพร้อมแอนิเมชันหมุน X
+│   │       ├── AnimatedSelect.css    # สไตล์ดรอปดาวน์เลือก
+│   │       ├── DateDropdown.jsx      # เครื่องมือเลือกวันที่แบบกำหนดเองพร้อมปฏิทิน
+│   │       ├── DateDropdown.css      # สไตล์เครื่องมือเลือกวันที่
+│   │       ├── TimeDropdown.jsx      # เครื่องมือเลือกเวลาแบบกำหนดเอง (รูปแบบ 24 ชั่วโมง)
+│   │       └── TimeDropdown.css      # สไตล์เครื่องมือเลือกเวลา
 │   ├── config/
-│   │   ├── config.js          # Centralized configuration (intervals, timezones, API)
-│   │   └── mqttConfig.js      # MQTT WebSocket configuration
+│   │   ├── config.js          # การตั้งค่าที่รวมศูนย์ (ช่วงเวลา, โซนเวลา, API)
+│   │   └── mqttConfig.js      # การตั้งค่า MQTT WebSocket
 │   ├── package.json
 │   ├── vite.config.js
 │   ├── .env.example           # ตัวอย่างการตั้งค่า environment variables (Cross-LAN)
 │   └── README.md
 └── lib/                       # Adafruit libraries สำหรับ Pico W
     └── adafruit_httpserver/   # HTTP server library
+        ├── __init__.mpy
+        ├── authentication.mpy
+        ├── exceptions.mpy
+        ├── headers.mpy
+        ├── methods.mpy
+        ├── mime_type.mpy
+        ├── mime_types.mpy
+        ├── README.md
+        ├── request.mpy
+        ├── response.mpy
+        ├── route.mpy
+        ├── server.mpy
+        └── status.mpy
 ```
 
 ## 🚀 Quick Start
@@ -428,7 +448,7 @@ home-iot/device/status        - Subscribe: รับสถานะ Pico W
 
 ### Frontend (React + Vite)
 - ✅ **Modern Professional Dashboard** - Dark theme พร้อม gradient effects
-- ✅ **Magic Bento Grid System** - Interactive card effects with particles, spotlight, border glow, magnetism, and click ripples
+- ✅ **Magic Bento Grid System** - เอฟเฟกต์การ์ดแบบโต้ตอบพร้อมอนุภาค, สปอตไลท์, ขอบเรืองแสง, แม่เหล็ก และคลิก ripples
 - ✅ **Animated Rolling Counter Clock** - แสดงเวลาแบบ real-time ด้วย GSAP
 - ✅ **Animated Light Bulb Indicator** - หลอดไฟ 3D ขนาดใหญ่ที่เรืองแสงเมื่อรีเลย์เปิด (ขยาย 40%)
 - ✅ **Custom Toggle Switch** - ปุ่มสไลด์แบบ iOS-style สำหรับควบคุมรีเลย์
@@ -535,36 +555,36 @@ Pico W (บ้าน) ←→ MQTT Broker (Internet) ←→ Backend (Cloud)
 ## 🛠️ Tech Stack
 
 ### Frontend
-- **React 18** + **Vite 6** - Fast HMR and optimized builds
-- **GSAP 3.13** - Professional animation library for Counter and Magic Bento effects with hardware acceleration
-- **MQTT.js** - WebSocket connection for real-time updates
-- **Axios** - HTTP client for API requests
-- **CSS3** - Custom dark theme with gradients, shadows, animations, and interactive effects
-- **IBM Plex Sans Thai** - Professional Thai font for entire UI
-- **Magic Bento Components** - Reusable interactive card system with particles, spotlight, border glow, magnetism, and click ripples
+- **React 18** + **Vite 6** - การพัฒนาที่รวดเร็วด้วย HMR และการ build ที่ปรับให้เหมาะสม
+- **GSAP 3.13** - ไลบรารีแอนิเมชันระดับมืออาชีพสำหรับเอฟเฟกต์ Counter และ Magic Bento พร้อม hardware acceleration
+- **MQTT.js** - การเชื่อมต่อ WebSocket สำหรับการอัปเดตแบบ real-time
+- **Axios** - HTTP client สำหรับคำขอ API
+- **CSS3** - ธีมมืดแบบกำหนดเองพร้อม gradients, shadows, animations และเอฟเฟกต์แบบโต้ตอบ
+- **IBM Plex Sans Thai** - ฟอนต์ไทยระดับมืออาชีพสำหรับ UI ทั้งหมด
+- **Magic Bento Components** - ระบบการ์ดแบบโต้ตอบที่นำกลับมาใช้ใหม่ได้ พร้อมอนุภาค, สปอตไลท์, ขอบเรืองแสง, แม่เหล็ก และคลิก ripples
 
 ### Backend
 - **Express.js 4** + **Node.js** - RESTful API server
-- **Axios** - HTTP client for time APIs and Pico W communication
-- **MQTT.js** - TCP broker client for pub/sub messaging
-- **Mongoose** - MongoDB Atlas integration for schedules
-- **Luxon** - Timezone conversions and date handling
-- **node-cron** - Scheduler loop (every 10 seconds)
-- **dgram** (Node.js UDP) - NTP protocol for Thai Navy time server
+- **Axios** - HTTP client สำหรับ time APIs และการสื่อสารกับ Pico W
+- **MQTT.js** - TCP broker client สำหรับ pub/sub messaging
+- **Mongoose** - บูรณาการ MongoDB Atlas สำหรับกำหนดการ
+- **Luxon** - การแปลงโซนเวลาและการจัดการวันที่
+- **node-cron** - ลูปตัวกำหนดเวลา (ทุก 10 วินาที)
+- **dgram** (Node.js UDP) - โปรโตคอล NTP สำหรับ Thai Navy time server
 
 ### Pico W (CircuitPython)
-- **CircuitPython 9.x** - Modern Python for microcontrollers
-- **adafruit_httpserver** - Lightweight HTTP server
+- **CircuitPython 9.x** - Python สมัยใหม่สำหรับไมโครคอนโทรลเลอร์
+- **adafruit_httpserver** - HTTP server น้ำหนักเบา
 - **adafruit_ntp** - Network Time Protocol client
-- **socketpool** + **wifi** - Network connectivity
-- **rtc** - Real-time Clock chip integration
-- **adafruit_minimqtt** (optional) - MQTT client with auto-fallback
-- **digitalio** - GPIO control for relay (GP14)
+- **socketpool** + **wifi** - การเชื่อมต่อเครือข่าย
+- **rtc** - บูรณาการ Real-time Clock chip
+- **adafruit_minimqtt** (optional) - MQTT client พร้อม auto-fallback
+- **digitalio** - การควบคุม GPIO สำหรับรีเลย์ (GP14)
 
 ### Infrastructure
-- **MongoDB Atlas** - Cloud database for schedule storage
+- **MongoDB Atlas** - ฐานข้อมูลคลาวด์สำหรับการจัดเก็บกำหนดการ
 - **HiveMQ** (Public) / **Mosquitto** (Self-hosted) - MQTT brokers
-- **Hardware**: Relay module (GPIO14)
+- **Hardware**: โมดูลรีเลย์ (GPIO14)
 - **Protocol**: HTTP REST API + MQTT (TCP/WebSocket)
 - **Time Source**: worldtimeapi.org (ปรับแต่งได้ผ่าน `TIME_API_URL`)
 
@@ -575,20 +595,20 @@ Pico W (บ้าน) ←→ MQTT Broker (Internet) ←→ Backend (Cloud)
 - `pico_simulator.py` - Python simulator สำหรับทดสอบ Pico W โดยไม่ต้องมีฮาร์ดแวร์จริง
 - `requirements_simulator.txt` - Dependencies สำหรับ Pico W simulator
 - `settings.toml` - WiFi + MQTT config สำหรับ Pico W
-- [Backend README](backend/README.md) - Express server + MQTT setup
+- [Backend README](backend/README.md) - Express server + การตั้งค่า MQTT
 - `backend/models/Schedule.js` - โครงสร้างกำหนดการบน MongoDB
-- `backend/services/timeService.js` - Multi-provider NTP/HTTP time sync (Thai Navy primary)
-- `backend/services/scheduler.js` - Automated schedule execution loop
-- `backend/services/fileStorage.js` - JSON fallback storage for development
-- `backend/services/mongoStorage.js` - Production MongoDB integration
+- `backend/services/timeService.js` - การซิงค์เวลา NTP/HTTP หลายผู้ให้บริการ (Thai Navy เป็นหลัก)
+- `backend/services/scheduler.js` - ลูปการทำงานอัตโนมัติของตัวกำหนดเวลา
+- `backend/services/fileStorage.js` - ที่เก็บข้อมูล JSON สำรองสำหรับการพัฒนา
+- `backend/services/mongoStorage.js` - บูรณาการ MongoDB สำหรับการใช้งานจริง
 - [Frontend README](frontend/README.md) - React app + WebSocket MQTT
-- `frontend/src/config.js` - Centralized configuration (intervals, timezones, API base)
-- `frontend/src/components/Counter.jsx` - Animated rolling counter with GSAP
-- `frontend/src/components/MagicBento.jsx` - Magic Bento card system with interactive effects
-- `frontend/src/components/MagicBento.css` - Styling for particle effects and border glow
-- `frontend/src/App.jsx` - Main dashboard logic (relay control, scheduling, real-time updates)
-- `frontend/src/App.css` - Modern dark theme styling (lightbulb animation 40% larger, toggle switch, status borders, form styling)
-- [MQTT Setup Guide](MQTT_SETUP.md) - การตั้งค่า MQTT broker และทดสอบ
+- `frontend/src/config.js` - การตั้งค่าที่รวมศูนย์ (ช่วงเวลา, โซนเวลา, API base)
+- `frontend/src/components/Counter.jsx` - นาฬิกานับแบบหมุนเคลื่อนไหวด้วย GSAP
+- `frontend/src/components/MagicBento.jsx` - ระบบการ์ด Magic Bento พร้อมเอฟเฟกต์แบบโต้ตอบ
+- `frontend/src/components/MagicBento.css` - สไตล์สำหรับเอฟเฟกต์อนุภาคและขอบเรืองแสง
+- `frontend/src/App.jsx` - ตรรกะแดชบอร์ดหลัก (ควบคุมรีเลย์, การกำหนดเวลา, อัปเดตแบบ real-time)
+- `frontend/src/App.css` - สไตล์ธีมมืดสมัยใหม่ (แอนิเมชันหลอดไฟใหญ่ขึ้น 40%, ปุ่มสลับ, ขอบสถานะ, สไตล์ฟอร์ม)
+- [MQTT Setup Guide](MQTT_SETUP.md) - คู่มือการตั้งค่า MQTT broker และทดสอบ
 - `test_ntp.py` - Python script สำหรับทดสอบ NTP time sync
 
 ## 🐛 Troubleshooting
@@ -656,7 +676,7 @@ Pico W (บ้าน) ←→ MQTT Broker (Internet) ←→ Backend (Cloud)
 - ปรับ `clickEffectScale` (default: 1 สำหรับ card เล็ก, 0.4 สำหรับ card ใหญ่)
 
 ### เวลาไม่ตรง / Time Sync ล้มเหลว
-- **Multi-provider Fallback:** TimeService จะลองตามลำดับ:
+- **การ fallback หลายผู้ให้บริการ:** TimeService จะลองตามลำดับ:
   1. Thai Navy NTP (`navy.ntppool.in.th:123` UDP)
   2. HTTP Time Header (`https://www.google.com`)
   3. WorldTimeAPI (`https://worldtimeapi.org/api/timezone/Asia/Bangkok`)
@@ -670,7 +690,7 @@ Pico W (บ้าน) ←→ MQTT Broker (Internet) ←→ Backend (Cloud)
 - ตรวจสอบว่า import จาก `./config` หรือ `../config/config.js` ถูกต้อง
 - Restart Vite dev server: `Ctrl+C` แล้ว `npm run dev`
 - ตรวจสอบ `APP_CONFIG` values ใน browser console: `console.log(APP_CONFIG)`
-- **Available Settings:**
+- **การตั้งค่าที่มีอยู่:**
   - `TIME_SYNC_INTERVAL` - ความถี่ sync เวลากับ backend (default: 30000ms / 30s)
   - `SCHEDULE_FETCH_INTERVAL` - ความถี่ดึงรายการกำหนดการ (default: 30000ms)
   - `CLOCK_UPDATE_INTERVAL` - ความถี่อัปเดตนาฬิกาหน้าจอ (default: 1000ms / 1s)
